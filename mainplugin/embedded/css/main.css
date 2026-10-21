@@ -1,0 +1,25 @@
+.bingo-cards {
+  .bingo-card {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: repeat(5, 1fr);
+    
+    /* Sizing and borders */
+    width: 100%;
+    aspect-ratio: 1 / 1; /* Keeps the card perfectly square */
+
+    margin-bottom: 1em;
+    break-after: page;
+
+    .bingo-card-cell {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 4px;
+      text-align: center;
+      aspect-ratio: 1 / 1; /* Keeps the card perfectly square */
+    }
+  }
+}
