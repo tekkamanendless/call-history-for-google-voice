@@ -269,19 +269,66 @@ func renderCalls(calls []*Call) app.UI {
 		call := calls[i]
 
 		return app.Div().
+			Class("call").
+			Style("display", "flex").
 			Body(
-				app.Span().Text(call.Time.Format(time.RFC3339)),
-				app.Text(" "),
-				app.Span().Text(fmt.Sprintf("Calls: (%d)", len(call.Calls))),
+				app.Span().
+					Class("time").
+					Text(call.Time.Format(time.RFC3339)),
 				app.Div().
 					Style("padding-left", "1em").
 					Body(
-						app.Span().Text(call.Source+" -> "+call.Destination+" ("+call.DestinationType+") + "+call.DestinationName),
-						app.Br(),
-						app.Span().Text(call.EventType),
+						app.If(call.EventType != "", func() app.UI {
+							icon := ""
+							switch call.EventType {
+							case "EVENT_TYPE_PBX_RING_GROUP":
+								icon = "user-group"
+							case "EVENT_TYPE_PBX_AUTO_ATTENDANT":
+								icon = "tty"
+							case "EVENT_TYPE_CALL":
+								icon = "phone"
+							}
+
+							if icon == "" {
+								return app.Span().Text(call.EventType)
+							}
+							return blazar.Icon().
+								Icon(icon)
+						}),
 						app.Text(" | "),
-						app.Span().Text(call.EventName),
-						app.Text(" ("+call.EventStatus+")"),
+						app.If(call.EventName != "", func() app.UI {
+							icon := ""
+							switch call.EventName {
+							case "AUTO_ATTENDANT_INCOMING_CALL_RECEIVED":
+								icon = "arrow-left"
+							case "INCOMING_CALL_RECEIVED":
+								icon = "arrow-left"
+							case "OUTGOING_CALL_MADE":
+								icon = "arrow-right"
+							case "RING_GROUP_VOICEMAIL_RECEIVED":
+								icon = "voicemail"
+							}
+
+							if icon == "" {
+								return app.Span().Text(call.EventName)
+							}
+							return blazar.Icon().
+								Icon(icon)
+						}),
+						app.If(call.EventStatus != "", func() app.UI {
+							if call.EventStatus == "SUCCEEDED" {
+								return nil
+							}
+							return app.Text(" (" + call.EventStatus + ")")
+						}),
+						app.Span().Text(" "),
+						app.If(call.SourceName != "", func() app.UI {
+							return app.Span().Text(call.SourceName)
+						}),
+						app.If(call.SourceName != "", func() app.UI {
+							return app.Span().Text(" -> ")
+						}),
+						app.Span().Text(call.Destination+" ("+call.DestinationType+") + "+call.DestinationName),
 						app.Br(),
 						app.If(call.CallDuration > 0, func() app.UI {
 							return app.Span().Text("Duration: " + call.CallDuration.String())
@@ -461,6 +508,18 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 			if rawEvent.Type == "EVENT_TYPE_NETWORK_STATISTICS_CLIENT" {
 				continue
 			}
+			// Skip the ring group metadata; we only care about the actual calls that were made.
+			if rawEvent.Type == "EVENT_TYPE_PBX_RING_GROUP" && rawEvent.Name == "RING_GROUP_OUTGOING_CALL_MADE" {
+				continue
+			}
+			// Skip the ring group summary record.
+			if rawEvent.Type == "EVENT_TYPE_PBX_RING_GROUP" && rawEvent.Name == "RING_GROUP_INCOMING_CALL_RECEIVED" {
+				continue
+			}
+			// Skip the auto attendant summary record.
+			if rawEvent.Type == "EVENT_TYPE_PBX_AUTO_ATTENDANT" && rawEvent.Name == "AUTO_ATTENDANT_OUTGOING_CALL_MADE" {
+				continue
+			}
 
 			call.Time = t
 			call.Source = parameters["PARAM_SOURCE"].Value
@@ -507,6 +566,9 @@ func aggregateCalls(calls []*Call) []*Call {
 		if call.DestinationType == "auto-attendant" || call.DestinationType == "ring-group" {
 			for c := 0; c < len(calls); c++ {
 				if calls[c].Source == call.Source && calls[c].Time.Before(call.Time.Add(call.CallDuration)) {
+					calls[c].Source = ""
+					calls[c].SourceName = ""
+
 					call.Calls = append(call.Calls, calls[c])
 					calls = append(calls[:c], calls[c+1:]...)
 					c--
