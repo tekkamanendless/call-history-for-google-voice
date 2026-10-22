@@ -314,10 +314,14 @@ func renderCalls(calls []*Call) app.UI {
 							return app.Text(" (" + call.EventStatus + ")")
 						}),
 						app.Span().Text(" "),
-						app.If(call.SourceName != "", func() app.UI {
-							return app.Span().Text(call.SourceName)
+						app.If(call.Source != "" || call.SourceName != "", func() app.UI {
+							text := call.Source
+							if call.SourceName != "" {
+								text += " (" + call.SourceName + ")"
+							}
+							return app.Span().Text(text)
 						}),
-						app.If(call.SourceName != "", func() app.UI {
+						app.If(call.Source != "" || call.SourceName != "", func() app.UI {
 							return app.Span().Text(" -> ")
 						}),
 						app.Span().Text(call.Destination+" ("+call.DestinationType+") + "+call.DestinationName),
@@ -558,15 +562,16 @@ func aggregateCalls(calls []*Call) []*Call {
 		if call.DestinationType == "auto-attendant" || call.DestinationType == "ring-group" {
 			for c := 0; c < len(calls); c++ {
 				if calls[c].Source == call.Source && calls[c].Time.Before(call.Time.Add(call.CallDuration)) {
-					calls[c].Source = ""
-					calls[c].SourceName = ""
-
 					call.Calls = append(call.Calls, calls[c])
 					calls = append(calls[:c], calls[c+1:]...)
 					c--
 				}
 			}
 			call.Calls = aggregateCalls(call.Calls)
+			for c := range call.Calls {
+				call.Calls[c].Source = ""
+				call.Calls[c].SourceName = ""
+			}
 		}
 		aggregatedCalls = append(aggregatedCalls, call)
 	}
