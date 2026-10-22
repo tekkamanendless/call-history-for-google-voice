@@ -1,25 +1,19 @@
-.bingo-cards {
-  .bingo-card {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    grid-template-rows: repeat(5, 1fr);
-    
-    /* Sizing and borders */
-    width: 100%;
-    aspect-ratio: 1 / 1; /* Keeps the card perfectly square */
+.direction-IN {
+  color: #008000;
+}
 
-    margin-bottom: 1em;
-    break-after: page;
+.direction-OUT {
+  color: #0000FF;
+}
 
-    .bingo-card-cell {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      border: 1px solid #333;
-      border-radius: 4px;
-      padding: 4px;
-      text-align: center;
-      aspect-ratio: 1 / 1; /* Keeps the card perfectly square */
-    }
-  }
+.result-CONNECTED {
+  color: #008000;
+}
+
+.result-VOICEMAIL {
+  color: #FF0000;
+}
+
+.result-MESSAGE {
+  color: #0000FF;
 }

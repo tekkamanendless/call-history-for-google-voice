@@ -361,19 +361,20 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 						icon = "arrow-right"
 					}
 					return blazar.Icon().
+						Class("direction-" + row.Direction).
 						Icon(icon)
 				},
 			},
 			{
 				Name: "Source",
 				Value: func(row Row) any {
-					return formatPhoneNumber(row.Source)
+					return blazar.Copy().Text(formatPhoneNumber(row.Source))
 				},
 			},
 			{
 				Name: "Destination",
 				Value: func(row Row) any {
-					return formatPhoneNumber(row.Destination)
+					return blazar.Copy().Text(formatPhoneNumber(row.Destination))
 				},
 			},
 			{
@@ -397,7 +398,12 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 					case "MESSAGE":
 						icon = "message"
 					}
+					if icon == "" {
+						return row.Result
+					}
+
 					return blazar.Icon().
+						Class("result-" + row.Result).
 						Icon(icon)
 				},
 			},
