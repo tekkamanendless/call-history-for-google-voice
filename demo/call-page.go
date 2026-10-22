@@ -368,13 +368,17 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			{
 				Name: "Source",
 				Value: func(row Row) any {
-					return blazar.Copy().Text(formatPhoneNumber(row.Source))
+					return blazar.Copy().
+						Value(formatPhoneNumber(row.Source)).
+						Text(formatPhoneNumber(row.Source))
 				},
 			},
 			{
 				Name: "Destination",
 				Value: func(row Row) any {
-					return blazar.Copy().Text(formatPhoneNumber(row.Destination))
+					return blazar.Copy().
+						Value(formatPhoneNumber(row.Destination)).
+						Text(formatPhoneNumber(row.Destination))
 				},
 			},
 			{
