@@ -27,6 +27,7 @@ type CallsPage struct {
 
 	errorMessage string
 
+	timezone      *time.Location
 	authClient    app.Value
 	userInfo      *googleoauth2.Userinfo
 	adminClient   *admin.Service
@@ -40,6 +41,19 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 	c.maxResults = 0
 	c.startTimeString = time.Now().Add(-1 * time.Hour * 24).Format(time.DateOnly)
 	//c.endTime = time.Now()
+	c.timezone = time.Local
+
+	{
+		jsTimezone := app.Window().Get("Intl").Call("DateTimeFormat").Call("resolvedOptions").Get("timeZone").String()
+		timezone, err := time.LoadLocation(jsTimezone)
+		if err != nil {
+			slog.ErrorContext(ctx.Context, "CallPage: OnMount: could not load timezone", "jsTimezone", jsTimezone, "err", err)
+		} else {
+			c.timezone = timezone
+			slog.InfoContext(ctx.Context, "CallPage: OnMount: loaded timezone", "timezone", timezone)
+		}
+	}
+	slog.InfoContext(ctx.Context, "CallPage: OnMount: timezone", "timezone", c.timezone)
 
 	{
 		var token oauth2.Token
@@ -67,6 +81,7 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 					token := oauth2.Token{
 						AccessToken: info.Get("access_token").String(),
 						ExpiresIn:   int64(info.Get("expires_in").Int()),
+						Expiry:      time.Now().Add(time.Duration(info.Get("expires_in").Int()) * time.Second),
 						TokenType:   info.Get("token_type").String(),
 					}
 
@@ -177,8 +192,16 @@ func (c *CallsPage) Render() app.UI {
 				return app.Div().
 					Style("font-size", "0.8em").
 					Body(
+						app.H2().Text("Call Table"),
+						c.renderCallTable(c.calls),
+					)
+			}),
+			app.If(len(c.calls) > 0, func() app.UI {
+				return app.Div().
+					Style("font-size", "0.8em").
+					Body(
 						app.H2().Text("Calls"),
-						renderCalls(c.calls),
+						c.renderCalls(c.calls),
 					)
 			}),
 			app.If(len(c.rawActivities) > 0, func() app.UI {
@@ -256,7 +279,143 @@ func (c *CallsPage) Render() app.UI {
 		)
 }
 
-func renderCalls(calls []*Call) app.UI {
+func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
+	type Row struct {
+		Time        time.Time
+		Direction   string
+		Source      string
+		Destination string
+		Duration    time.Duration
+		Result      string
+		ResultUser  string
+		Calls       []*Call
+	}
+
+	rows := []Row{}
+	for _, call := range calls {
+		row := Row{
+			Time:        call.Time,
+			Source:      call.Source,
+			Destination: call.Destination,
+			Duration:    call.CallDuration,
+		}
+		if strings.Contains(call.EventName, "INCOMING") {
+			row.Direction = "IN"
+		} else if strings.Contains(call.EventName, "OUTGOING") {
+			row.Direction = "OUT"
+		}
+
+		voicemail := false
+		resultUser := ""
+		for _, call := range call.Calls {
+			if call.EventName == "RING_GROUP_VOICEMAIL_RECEIVED" {
+				voicemail = true
+				break
+			}
+
+			if call.CallDuration > 0 {
+				switch row.Direction {
+				case "IN":
+					resultUser = call.DestinationName
+				}
+			}
+		}
+		if row.Direction == "OUT" {
+			resultUser = call.SourceName
+		}
+
+		if voicemail {
+			row.Result = "VOICEMAIL"
+		} else if call.CallDuration > 0 {
+			row.Result = "CONNECTED"
+			row.ResultUser = resultUser
+		} else {
+			row.ResultUser = resultUser
+		}
+		rows = append(rows, row)
+	}
+
+	return blazar.Table[Row]().
+		Columns([]blazar.TableColumn[Row]{
+			{
+				Name: "Time",
+				Value: func(row Row) any {
+					return row.Time.In(c.timezone).Format("2006-01-02 3:04:05pm")
+				},
+			},
+			{
+				Name: "Direction",
+				Value: func(row Row) any {
+					icon := ""
+					switch row.Direction {
+					case "IN":
+						icon = "arrow-left"
+					case "OUT":
+						icon = "arrow-right"
+					}
+					return blazar.Icon().
+						Icon(icon)
+				},
+			},
+			{
+				Name: "Source",
+				Value: func(row Row) any {
+					return formatPhoneNumber(row.Source)
+				},
+			},
+			{
+				Name: "Destination",
+				Value: func(row Row) any {
+					return formatPhoneNumber(row.Destination)
+				},
+			},
+			{
+				Name: "Duration",
+				Value: func(row Row) any {
+					if row.Duration == 0 {
+						return ""
+					}
+					return row.Duration.String()
+				},
+			},
+			{
+				Name: "Result",
+				Value: func(row Row) any {
+					icon := ""
+					switch row.Result {
+					case "CONNECTED":
+						icon = "phone"
+					case "VOICEMAIL":
+						icon = "voicemail"
+					}
+					return blazar.Icon().
+						Icon(icon)
+				},
+			},
+			{
+				Name: "Result User",
+				Value: func(row Row) any {
+					return row.ResultUser
+				},
+			},
+		}).
+		Rows(rows)
+}
+
+func formatPhoneNumber(phoneNumber string) string {
+	if phoneNumber == "" {
+		return ""
+	}
+	if strings.HasPrefix(phoneNumber, "+1") {
+		localPortion := phoneNumber[2:]
+		if len(localPortion) == 10 {
+			return "(" + localPortion[:3] + ") " + localPortion[3:6] + "-" + localPortion[6:]
+		}
+	}
+	return phoneNumber
+}
+
+func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 	return app.Range(calls).Slice(func(i int) app.UI {
 		call := calls[i]
 
@@ -266,7 +425,7 @@ func renderCalls(calls []*Call) app.UI {
 			Body(
 				app.Span().
 					Class("time").
-					Text(call.Time.Format(time.RFC3339)),
+					Text(call.Time.Format(time.RFC3339Nano)),
 				app.Div().
 					Style("padding-left", "1em").
 					Body(
@@ -296,6 +455,10 @@ func renderCalls(calls []*Call) app.UI {
 							case "INCOMING_CALL_RECEIVED":
 								icon = "arrow-left"
 							case "OUTGOING_CALL_MADE":
+								icon = "arrow-right"
+							case "RING_GROUP_INCOMING_CALL_RECEIVED":
+								icon = "arrow-left"
+							case "RING_GROUP_OUTGOING_CALL_MADE":
 								icon = "arrow-right"
 							case "RING_GROUP_VOICEMAIL_RECEIVED":
 								icon = "voicemail"
@@ -342,7 +505,7 @@ func renderCalls(calls []*Call) app.UI {
 							return app.Div().
 								Style("padding-left", "1em").
 								Body(
-									renderCalls(call.Calls),
+									c.renderCalls(call.Calls),
 								)
 						}),
 					),
@@ -388,6 +551,26 @@ func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) {
 	c.adminClient = adminClient
 }
 
+func (c *CallsPage) tokenIsExpired(ctx app.Context) bool {
+	var token oauth2.Token
+	ctx.GetState("user-token", &token)
+	if token.AccessToken != "" {
+		if token.Expiry.Before(time.Now()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *CallsPage) refreshToken(ctx app.Context) {
+	if c.authClient == nil {
+		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: authClient is nil")
+		return
+	}
+
+	c.authClient.Call("requestAccessToken")
+}
+
 func (c *CallsPage) logout(ctx app.Context) {
 	slog.InfoContext(ctx.Context, "CallPage: logout")
 	c.userInfo = nil
@@ -403,6 +586,10 @@ func (c *CallsPage) search(ctx app.Context) {
 		return
 	}
 
+	if c.tokenIsExpired(ctx) {
+		c.refreshToken(ctx)
+	}
+
 	ctx.Async(func() {
 		call := c.adminClient.Activities.List("all", "voice")
 		if c.startTimeString != "" {
@@ -411,7 +598,7 @@ func (c *CallsPage) search(ctx app.Context) {
 				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
 				return
 			}
-			call = call.StartTime(startTime.Format(time.RFC3339))
+			call = call.StartTime(startTime.Format(time.RFC3339Nano))
 		}
 		if c.endTimeString != "" {
 			endTime, err := time.Parse(time.DateOnly, c.endTimeString)
@@ -419,7 +606,7 @@ func (c *CallsPage) search(ctx app.Context) {
 				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
 				return
 			}
-			call = call.EndTime(endTime.Format(time.RFC3339))
+			call = call.EndTime(endTime.Format(time.RFC3339Nano))
 		}
 		if c.maxResults > 0 {
 			call = call.MaxResults(int64(c.maxResults))
@@ -429,6 +616,14 @@ func (c *CallsPage) search(ctx app.Context) {
 		for {
 			activities, err := call.Do()
 			if err != nil {
+				var retrieveErr *googleapi.Error
+				if errors.As(err, &retrieveErr) {
+					slog.ErrorContext(ctx.Context, "CallPage: search: oauth2 error", "ErrorCode", retrieveErr.Code)
+					if retrieveErr.Code == 401 {
+						c.logout(ctx)
+					}
+				}
+
 				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
 				return
 			}
@@ -494,7 +689,7 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 			if parameters["PARAM_DESTINATION"] == nil {
 				continue
 			}
-			t, err := time.Parse(time.RFC3339, rawActivity.Id.Time)
+			t, err := time.Parse(time.RFC3339Nano, rawActivity.Id.Time)
 			if err != nil {
 				slog.ErrorContext(ctx, "CallPage: parseCalls: error", "err", err)
 				continue
@@ -523,16 +718,19 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 
 			if parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0 {
 				call.RingDuration = time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue) * time.Millisecond)
+				//call.Time = call.Time.Add(-call.RingDuration)
 			}
 			if parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0 {
 				call.CallDuration = time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue) * time.Millisecond)
+				//call.Time = call.Time.Add(call.CallDuration)
 			}
 			if strings.HasPrefix(rawActivity.ResourceDetails[0].Id, "phone_number/") {
 				call.DestinationType = "phone"
 				call.DestinationName = rawActivity.ResourceDetails[0].Title
-				if rawEvent.Name == "INCOMING_CALL_RECEIVED" {
+				switch rawEvent.Name {
+				case "INCOMING_CALL_RECEIVED":
 					call.DestinationName = rawActivity.Actor.Email
-				} else if rawEvent.Name == "OUTGOING_CALL_MADE" {
+				case "OUTGOING_CALL_MADE":
 					call.SourceName = rawActivity.Actor.Email
 				}
 			} else if strings.HasPrefix(rawActivity.ResourceDetails[0].Id, "auto_attendant/") {
