@@ -125,6 +125,24 @@ func main() {
 						return &demo.IndexPage{}
 					},
 				},
+				{
+					Path: "/calls",
+					Component: func() app.Composer {
+						return &demo.CallsPage{}
+					},
+				},
+				{
+					Path: "/privacy",
+					Component: func() app.Composer {
+						return &demo.PrivacyPage{}
+					},
+				},
+				{
+					Path: "/terms",
+					Component: func() app.Composer {
+						return &demo.TermsPage{}
+					},
+				},
 			},
 		},
 	)
