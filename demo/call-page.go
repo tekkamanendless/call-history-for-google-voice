@@ -299,12 +299,13 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			Destination: call.Destination,
 			Duration:    call.CallDuration,
 		}
-		if strings.Contains(call.EventName, "INCOMING") {
+		if strings.Contains(call.EventName, "INCOMING") || call.EventName == "MSG_RECEIVED" {
 			row.Direction = "IN"
-		} else if strings.Contains(call.EventName, "OUTGOING") {
+		} else if strings.Contains(call.EventName, "OUTGOING") || call.EventName == "MSG_SENT" {
 			row.Direction = "OUT"
 		}
 
+		message := call.EventType == "EVENT_TYPE_MSG"
 		voicemail := false
 		resultUser := ""
 		for _, call := range call.Calls {
@@ -323,11 +324,17 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 		if row.Direction == "OUT" {
 			resultUser = call.SourceName
 		}
+		if message && row.Direction == "IN" {
+			resultUser = call.DestinationName
+		}
 
 		if voicemail {
 			row.Result = "VOICEMAIL"
 		} else if call.CallDuration > 0 {
 			row.Result = "CONNECTED"
+			row.ResultUser = resultUser
+		} else if message {
+			row.Result = "MESSAGE"
 			row.ResultUser = resultUser
 		} else {
 			row.ResultUser = resultUser
@@ -387,6 +394,8 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 						icon = "phone"
 					case "VOICEMAIL":
 						icon = "voicemail"
+					case "MESSAGE":
+						icon = "message"
 					}
 					return blazar.Icon().
 						Icon(icon)
@@ -438,6 +447,8 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 								icon = "tty"
 							case "EVENT_TYPE_CALL":
 								icon = "phone"
+							case "EVENT_TYPE_MSG":
+								icon = "message"
 							}
 
 							if icon == "" {
@@ -454,6 +465,10 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 								icon = "arrow-left"
 							case "INCOMING_CALL_RECEIVED":
 								icon = "arrow-left"
+							case "MSG_RECEIVED":
+								icon = "arrow-left"
+							case "MSG_SENT":
+								icon = "arrow-right"
 							case "OUTGOING_CALL_MADE":
 								icon = "arrow-right"
 							case "RING_GROUP_INCOMING_CALL_RECEIVED":
@@ -728,9 +743,9 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 				call.DestinationType = "phone"
 				call.DestinationName = rawActivity.ResourceDetails[0].Title
 				switch rawEvent.Name {
-				case "INCOMING_CALL_RECEIVED":
+				case "INCOMING_CALL_RECEIVED", "MSG_RECEIVED":
 					call.DestinationName = rawActivity.Actor.Email
-				case "OUTGOING_CALL_MADE":
+				case "OUTGOING_CALL_MADE", "MSG_SENT":
 					call.SourceName = rawActivity.Actor.Email
 				}
 			} else if strings.HasPrefix(rawActivity.ResourceDetails[0].Id, "auto_attendant/") {
