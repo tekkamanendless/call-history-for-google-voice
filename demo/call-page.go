@@ -281,23 +281,27 @@ func (c *CallsPage) Render() app.UI {
 
 func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 	type Row struct {
-		Time        time.Time
-		Direction   string
-		Source      string
-		Destination string
-		Duration    time.Duration
-		Result      string
-		ResultUser  string
-		Calls       []*Call
+		Time            time.Time
+		Direction       string
+		Source          string
+		SourceName      string
+		Destination     string
+		DestinationName string
+		Duration        time.Duration
+		Result          string
+		ResultUser      string
+		Calls           []*Call
 	}
 
 	rows := []Row{}
 	for _, call := range calls {
 		row := Row{
-			Time:        call.Time,
-			Source:      call.Source,
-			Destination: call.Destination,
-			Duration:    call.CallDuration,
+			Time:            call.Time,
+			Source:          call.Source,
+			SourceName:      call.SourceName,
+			Destination:     call.Destination,
+			DestinationName: call.DestinationName,
+			Duration:        call.CallDuration,
 		}
 		if strings.Contains(call.EventName, "INCOMING") || call.EventName == "MSG_RECEIVED" {
 			row.Direction = "IN"
@@ -370,6 +374,9 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 					case "OUT":
 						icon = "arrow-right"
 					}
+					if icon == "" {
+						return row.Direction
+					}
 					return blazar.Icon().
 						Class("direction-" + row.Direction).
 						Icon(icon)
@@ -378,17 +385,59 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			{
 				Name: "Source",
 				Value: func(row Row) any {
-					return blazar.Copy().
-						Value(formatPhoneNumber(row.Source)).
-						Text(formatPhoneNumber(row.Source))
+					if row.Source == "" {
+						return ""
+					}
+					body := []app.UI{}
+					if row.SourceName != "" {
+						body = append(body,
+							app.Span().
+								Class("name").
+								Text(row.SourceName),
+						)
+					}
+					if len(body) > 0 {
+						body = append(body,
+							app.Br(),
+						)
+					}
+					body = append(body,
+						blazar.Copy().
+							Value(formatPhoneNumber(row.Source)).
+							Text(formatPhoneNumber(row.Source)),
+					)
+					return app.Div().
+						Class("source").
+						Body(body...)
 				},
 			},
 			{
 				Name: "Destination",
 				Value: func(row Row) any {
-					return blazar.Copy().
-						Value(formatPhoneNumber(row.Destination)).
-						Text(formatPhoneNumber(row.Destination))
+					if row.Destination == "" {
+						return ""
+					}
+					body := []app.UI{}
+					if row.DestinationName != "" {
+						body = append(body,
+							app.Span().
+								Class("name").
+								Text(row.DestinationName),
+						)
+					}
+					if len(body) > 0 {
+						body = append(body,
+							app.Br(),
+						)
+					}
+					body = append(body,
+						blazar.Copy().
+							Value(formatPhoneNumber(row.Destination)).
+							Text(formatPhoneNumber(row.Destination)),
+					)
+					return app.Div().
+						Class("destination").
+						Body(body...)
 				},
 			},
 			{
@@ -765,12 +814,13 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 			}
 			if strings.HasPrefix(rawActivity.ResourceDetails[0].Id, "phone_number/") {
 				call.DestinationType = "phone"
-				call.DestinationName = rawActivity.ResourceDetails[0].Title
 				switch rawEvent.Name {
 				case "INCOMING_CALL_RECEIVED", "MSG_RECEIVED":
 					call.DestinationName = rawActivity.Actor.Email
 				case "OUTGOING_CALL_MADE", "MSG_SENT":
 					call.SourceName = rawActivity.Actor.Email
+				default:
+					call.DestinationName = rawActivity.ResourceDetails[0].Title
 				}
 			} else if strings.HasPrefix(rawActivity.ResourceDetails[0].Id, "auto_attendant/") {
 				call.DestinationType = "auto-attendant"
@@ -778,6 +828,9 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 			} else if strings.HasPrefix(rawActivity.ResourceDetails[0].Id, "ring_group/") {
 				call.DestinationType = "ring-group"
 				call.DestinationName = rawActivity.ResourceDetails[0].Title
+			}
+			if call.DestinationName == call.Destination {
+				call.DestinationName = ""
 			}
 			calls = append(calls, call)
 		}
