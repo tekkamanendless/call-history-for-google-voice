@@ -307,6 +307,7 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 
 		message := call.EventType == "EVENT_TYPE_MSG"
 		voicemail := false
+		incomplete := false
 		resultUser := ""
 		for _, call := range call.Calls {
 			if call.EventName == "RING_GROUP_VOICEMAIL_RECEIVED" {
@@ -314,7 +315,13 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 				break
 			}
 
+			if call.RingGroup {
+				incomplete = true
+			}
+
 			if call.CallDuration > 0 {
+				incomplete = false
+
 				switch row.Direction {
 				case "IN":
 					resultUser = call.DestinationName
@@ -323,6 +330,9 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 		}
 		if row.Direction == "OUT" {
 			resultUser = call.SourceName
+			if call.CallDuration == 0 {
+				incomplete = true
+			}
 		}
 		if message && row.Direction == "IN" {
 			resultUser = call.DestinationName
@@ -330,15 +340,15 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 
 		if voicemail {
 			row.Result = "VOICEMAIL"
+			resultUser = ""
+		} else if incomplete {
+			row.Result = "INCOMPLETE"
 		} else if call.CallDuration > 0 {
 			row.Result = "CONNECTED"
-			row.ResultUser = resultUser
 		} else if message {
 			row.Result = "MESSAGE"
-			row.ResultUser = resultUser
-		} else {
-			row.ResultUser = resultUser
 		}
+		row.ResultUser = resultUser
 		rows = append(rows, row)
 	}
 
@@ -396,7 +406,9 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 					icon := ""
 					switch row.Result {
 					case "CONNECTED":
-						icon = "phone"
+						icon = "phone-volume"
+					case "INCOMPLETE":
+						icon = "phone-slash"
 					case "VOICEMAIL":
 						icon = "voicemail"
 					case "MESSAGE":
@@ -682,6 +694,7 @@ type Call struct {
 	EventType       string        // The type of the event.
 	EventName       string        // The name of the event.
 	EventStatus     string        // The status of the event.
+	RingGroup       bool          // True if the call is a ring group call.
 	Calls           []*Call       // Only when DestinationType is auto-attendant or ring-group.
 }
 
@@ -743,11 +756,12 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 
 			if parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0 {
 				call.RingDuration = time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue) * time.Millisecond)
-				//call.Time = call.Time.Add(-call.RingDuration)
 			}
 			if parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0 {
 				call.CallDuration = time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue) * time.Millisecond)
-				//call.Time = call.Time.Add(call.CallDuration)
+			}
+			if parameters["PARAM_DISTRIBUTION_ID"] != nil && parameters["PARAM_DISTRIBUTION_ID"].Value != "" {
+				call.RingGroup = true
 			}
 			if strings.HasPrefix(rawActivity.ResourceDetails[0].Id, "phone_number/") {
 				call.DestinationType = "phone"

@@ -10,8 +10,12 @@
   color: #008000;
 }
 
-.result-VOICEMAIL {
+.result-INCOMPLETE {
   color: #FF0000;
+}
+
+.result-VOICEMAIL {
+  color: #008000;
 }
 
 .result-MESSAGE {
