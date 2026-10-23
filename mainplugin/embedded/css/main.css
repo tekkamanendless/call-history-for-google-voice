@@ -21,3 +21,11 @@
 .result-MESSAGE {
   color: #0000FF;
 }
+
+.destination .name {
+  font-size: 0.8em;
+}
+
+.source .name {
+  font-size: 0.8em;
+}
