@@ -64,6 +64,7 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}
 	}
 
+	// TODO: WRAP THIS IN A PROMISE SO THAT WE CAN AWAIT A LOGIN EVENT.
 	config := map[string]any{
 		"client_id": "531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com",
 		"scope": strings.Join([]string{
@@ -196,84 +197,87 @@ func (c *CallsPage) Render() app.UI {
 						c.renderCallTable(c.calls),
 					)
 			}),
-			app.If(len(c.calls) > 0, func() app.UI {
-				return app.Div().
-					Style("font-size", "0.8em").
-					Body(
-						app.H2().Text("Calls"),
-						c.renderCalls(c.calls),
-					)
-			}),
 			app.If(len(c.rawActivities) > 0, func() app.UI {
-				return app.Div().
-					Style("font-size", "0.8em").
+				return blazar.Collapse().
+					Label("Debug").
+					Open(false).
 					Body(
-						app.H2().Text("Raw Activities"),
-						app.Range(c.rawActivities).Slice(func(i int) app.UI {
-							rawActivity := c.rawActivities[i]
+						app.Div().
+							Style("font-size", "0.8em").
+							Body(
+								app.H2().Text("Calls"),
+								c.renderCalls(c.calls),
+							),
+						app.Div().
+							Style("font-size", "0.8em").
+							Body(
+								app.H2().Text("Raw Activities"),
+								app.Range(c.rawActivities).Slice(func(i int) app.UI {
+									rawActivity := c.rawActivities[i]
 
-							return app.Div().
-								Body(
-									app.Span().Text(rawActivity.Id.Time),
-									app.Text(" "),
-									app.Span().Text(rawActivity.Actor.Email),
-									app.Text(" "),
-									app.Span().Text(fmt.Sprintf("Events: (%d)", len(rawActivity.Events))),
-									app.Range(rawActivity.Events).Slice(func(i int) app.UI {
-										rawEvent := rawActivity.Events[i]
-										parameters := map[string]*admin.ActivityEventsParameters{}
-										for _, parameter := range rawEvent.Parameters {
-											parameters[parameter.Name] = parameter
-										}
+									return app.Div().
+										Body(
+											app.Span().Text(rawActivity.Id.Time),
+											app.Text(" "),
+											app.Span().Text(rawActivity.Actor.Email),
+											app.Text(" "),
+											app.Span().Text(fmt.Sprintf("Events: (%d)", len(rawActivity.Events))),
+											app.Range(rawActivity.Events).Slice(func(i int) app.UI {
+												rawEvent := rawActivity.Events[i]
+												parameters := map[string]*admin.ActivityEventsParameters{}
+												for _, parameter := range rawEvent.Parameters {
+													parameters[parameter.Name] = parameter
+												}
 
-										if rawEvent.Type == "EVENT_TYPE_PBX_AUTO_ATTENDANT" && rawEvent.Name == "AUTO_ATTENDANT_PUBLISHED" {
-											return nil
-										}
+												if rawEvent.Type == "EVENT_TYPE_PBX_AUTO_ATTENDANT" && rawEvent.Name == "AUTO_ATTENDANT_PUBLISHED" {
+													return nil
+												}
 
-										return app.Div().
-											Style("padding-left", "1em").
-											Body(
-												app.Span().Text(parameters["PARAM_SOURCE"].Value+" -> "+parameters["PARAM_DESTINATION"].Value),
-												app.Br(),
-												app.Span().Text(rawEvent.Type),
-												app.Text(" | "),
-												app.Span().Text(rawEvent.Name),
-												app.Text(" ("+rawEvent.Status.EventStatus+")"),
-												app.Br(),
-												app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
-													return app.Span().Text("Ring Group: " + parameters["PARAM_RING_GROUP_NAME"].Value)
-												}),
-												app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
-													return app.Br()
-												}),
-												app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
-													return app.Span().Text("Distribution ID: " + parameters["PARAM_DISTRIBUTION_ID"].Value)
-												}),
-												app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
-													return app.Br()
-												}),
-												app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
-													return app.Span().Text("Auto Attendant: " + parameters["PARAM_AUTO_ATTENDANT_NAME"].Value)
-												}),
-												app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
-													return app.Br()
-												}),
-												app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
-													return app.Span().Text("Duration: " + time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue)*time.Millisecond).String())
-												}),
-												app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
-													return app.Span().Text(" ")
-												}),
-												app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
-													return app.Span().Text("Ring Duration: " + time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue)*time.Millisecond).String())
-												}),
-												app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
-													return app.Span().Text(" ")
-												}),
-											)
-									}),
-								)
-						}),
+												return app.Div().
+													Style("padding-left", "1em").
+													Body(
+														app.Span().Text(parameters["PARAM_SOURCE"].Value+" -> "+parameters["PARAM_DESTINATION"].Value),
+														app.Br(),
+														app.Span().Text(rawEvent.Type),
+														app.Text(" | "),
+														app.Span().Text(rawEvent.Name),
+														app.Text(" ("+rawEvent.Status.EventStatus+")"),
+														app.Br(),
+														app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
+															return app.Span().Text("Ring Group: " + parameters["PARAM_RING_GROUP_NAME"].Value)
+														}),
+														app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
+															return app.Br()
+														}),
+														app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
+															return app.Span().Text("Distribution ID: " + parameters["PARAM_DISTRIBUTION_ID"].Value)
+														}),
+														app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
+															return app.Br()
+														}),
+														app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
+															return app.Span().Text("Auto Attendant: " + parameters["PARAM_AUTO_ATTENDANT_NAME"].Value)
+														}),
+														app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
+															return app.Br()
+														}),
+														app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
+															return app.Span().Text("Duration: " + time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue)*time.Millisecond).String())
+														}),
+														app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
+															return app.Span().Text(" ")
+														}),
+														app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
+															return app.Span().Text("Ring Duration: " + time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue)*time.Millisecond).String())
+														}),
+														app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
+															return app.Span().Text(" ")
+														}),
+													)
+											}),
+										)
+								}),
+							),
 					)
 			}),
 		)
