@@ -342,15 +342,15 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			resultUser = call.DestinationName
 		}
 
-		if voicemail {
+		if message {
+			row.Result = "MESSAGE"
+		} else if voicemail {
 			row.Result = "VOICEMAIL"
 			resultUser = ""
 		} else if incomplete {
 			row.Result = "INCOMPLETE"
 		} else if call.CallDuration > 0 {
 			row.Result = "CONNECTED"
-		} else if message {
-			row.Result = "MESSAGE"
 		}
 		row.ResultUser = resultUser
 		rows = append(rows, row)
@@ -649,12 +649,16 @@ func (c *CallsPage) tokenIsExpired(ctx app.Context) bool {
 }
 
 func (c *CallsPage) refreshToken(ctx app.Context) {
+	slog.InfoContext(ctx.Context, "CallPage: refreshToken")
 	if c.authClient == nil {
 		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: authClient is nil")
 		return
 	}
 
-	c.authClient.Call("requestAccessToken")
+	params := map[string]any{
+		"prompt": "",
+	}
+	c.authClient.Call("requestAccessToken", params)
 }
 
 func (c *CallsPage) logout(ctx app.Context) {
@@ -673,6 +677,7 @@ func (c *CallsPage) search(ctx app.Context) {
 	}
 
 	if c.tokenIsExpired(ctx) {
+		slog.InfoContext(ctx.Context, "CallPage: search: token is expired")
 		c.refreshToken(ctx)
 	}
 
