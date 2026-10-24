@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-app-blazar/blazar/blazar"
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
+	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
 	"golang.org/x/oauth2"
 	admin "google.golang.org/api/admin/reports/v1"
 	"google.golang.org/api/googleapi"
@@ -28,7 +29,7 @@ type CallsPage struct {
 	errorMessage string
 
 	timezone      *time.Location
-	authClient    app.Value
+	authClient    *googleoauthjs.TokenClient
 	userInfo      *googleoauth2.Userinfo
 	adminClient   *admin.Service
 	rawActivities []*admin.Activity
@@ -64,40 +65,31 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}
 	}
 
+	loginCallback := func(token oauth2.Token) {
+		ctx.Async(func() {
+			c.loginWithToken(ctx, token)
+
+			ctx.SetState("user-info", c.userInfo).Persist()
+			ctx.SetState("user-token", token).Persist()
+
+			ctx.Update()
+		})
+	}
+
+	errorCallback := func(err error) {
+		slog.ErrorContext(ctx.Context, "CallPage: OnMount: errorCallback", "err", err)
+	}
+
 	// TODO: WRAP THIS IN A PROMISE SO THAT WE CAN AWAIT A LOGIN EVENT.
-	config := map[string]any{
-		"client_id": "531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com",
-		"scope": strings.Join([]string{
+	c.authClient = googleoauthjs.NewTokenClient(ctx.Context,
+		googleoauthjs.WithClientID("531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com"),
+		googleoauthjs.WithScopes([]string{
 			"profile",
 			"https://www.googleapis.com/auth/admin.reports.audit.readonly",
-		}, " "),
-		"ux_mode": "popup",
-		"callback": app.FuncOf(func(this app.Value, args []app.Value) any {
-			ctx.Async(func() {
-				slog.InfoContext(ctx.Context, "CallPage: OnMount: callback", "args", len(args))
-				if len(args) > 0 {
-					info := args[0]
-					slog.InfoContext(ctx.Context, "CallPage: OnMount: callback: info", "JSON", app.Window().Get("JSON").Call("stringify", info))
-
-					token := oauth2.Token{
-						AccessToken: info.Get("access_token").String(),
-						ExpiresIn:   int64(info.Get("expires_in").Int()),
-						Expiry:      time.Now().Add(time.Duration(info.Get("expires_in").Int()) * time.Second),
-						TokenType:   info.Get("token_type").String(),
-					}
-
-					c.loginWithToken(ctx, token)
-
-					ctx.SetState("user-info", c.userInfo).Persist()
-					ctx.SetState("user-token", token).Persist()
-
-					ctx.Update()
-				}
-			})
-			return nil
 		}),
-	}
-	c.authClient = app.Window().Get("google").Get("accounts").Get("oauth2").Call("initTokenClient", config)
+		googleoauthjs.WithCallback(loginCallback),
+		googleoauthjs.WithErrorCallback(errorCallback),
+	)
 
 	/*
 		app.Window().Set("test_function", app.FuncOf(func(this app.Value, args []app.Value) any {
@@ -117,11 +109,15 @@ func (c *CallsPage) Render() app.UI {
 	return blazar.Page().
 		Body(
 			app.If(c.userInfo == nil, func() app.UI {
-				return blazar.Button().
-					Label("Sign in with Google").
-					On("click", func(ctx app.Context, e app.Event) {
-						c.authClient.Call("requestAccessToken")
-					})
+				return app.Div().
+					Body(
+						blazar.Button().
+							Label("Sign in with Google").
+							Icon("google fa-brands").
+							On("click", func(ctx app.Context, e app.Event) {
+								c.authClient.RequestAccessToken()
+							}),
+					)
 			}),
 			app.If(c.userInfo != nil, func() app.UI {
 				/*
@@ -131,12 +127,16 @@ func (c *CallsPage) Render() app.UI {
 							app.Span().Text(c.userInfo.Name),
 						)
 				*/
-				return blazar.Button().
-					Label("Log out as "+c.userInfo.Name).
-					On("click", func(ctx app.Context, e app.Event) {
-						c.logout(ctx)
-						ctx.Update()
-					})
+				return app.Div().
+					Body(
+						blazar.Button().
+							Label("Log out as "+c.userInfo.Name).
+							Icon("right-from-bracket").
+							On("click", func(ctx app.Context, e app.Event) {
+								c.logout(ctx)
+								ctx.Update()
+							}),
+					)
 			}),
 			/*
 				app.If(c.authClient != nil, func() app.UI {
@@ -159,126 +159,130 @@ func (c *CallsPage) Render() app.UI {
 						DataSet("callback", "test_function")
 				}),
 			*/
-			blazar.Collapse().
-				Label("Configuration").
-				Open(true).
-				Body(
-					blazar.Form().
+			app.IfSlice(c.userInfo != nil, func() []app.UI {
+				return []app.UI{
+					blazar.Collapse().
+						Label("Configuration").
+						Open(true).
 						Body(
-							blazar.Input[string]().
-								Label("Start Time").
-								Clearable(true).
-								Type("date").
-								Bind(&c.startTimeString),
-							blazar.Input[string]().
-								Label("End Time").
-								Clearable(true).
-								Type("date").
-								Bind(&c.endTimeString),
-							blazar.Input[uint]().
-								Label("Max Results").
-								Bind(&c.maxResults),
-						).
-						Action(blazar.FormAction{
-							Name:     "Search",
-							Function: c.search,
-						}),
-				),
-			app.If(c.errorMessage != "", func() app.UI {
-				return blazar.StatusBar().
-					Bad().
-					Text(c.errorMessage)
-			}),
-			app.If(len(c.calls) > 0, func() app.UI {
-				return app.Div().
-					Style("font-size", "0.8em").
-					Body(
-						app.H2().Text("Call Table"),
-						c.renderCallTable(c.calls),
-					)
-			}),
-			app.If(len(c.rawActivities) > 0, func() app.UI {
-				return blazar.Collapse().
-					Label("Debug").
-					Open(false).
-					Body(
-						app.Div().
-							Style("font-size", "0.8em").
-							Body(
-								app.H2().Text("Calls"),
-								c.renderCalls(c.calls),
-							),
-						app.Div().
-							Style("font-size", "0.8em").
-							Body(
-								app.H2().Text("Raw Activities"),
-								app.Range(c.rawActivities).Slice(func(i int) app.UI {
-									rawActivity := c.rawActivities[i]
-
-									return app.Div().
-										Body(
-											app.Span().Text(rawActivity.Id.Time),
-											app.Text(" "),
-											app.Span().Text(rawActivity.Actor.Email),
-											app.Text(" "),
-											app.Span().Text(fmt.Sprintf("Events: (%d)", len(rawActivity.Events))),
-											app.Range(rawActivity.Events).Slice(func(i int) app.UI {
-												rawEvent := rawActivity.Events[i]
-												parameters := map[string]*admin.ActivityEventsParameters{}
-												for _, parameter := range rawEvent.Parameters {
-													parameters[parameter.Name] = parameter
-												}
-
-												if rawEvent.Type == "EVENT_TYPE_PBX_AUTO_ATTENDANT" && rawEvent.Name == "AUTO_ATTENDANT_PUBLISHED" {
-													return nil
-												}
-
-												return app.Div().
-													Style("padding-left", "1em").
-													Body(
-														app.Span().Text(parameters["PARAM_SOURCE"].Value+" -> "+parameters["PARAM_DESTINATION"].Value),
-														app.Br(),
-														app.Span().Text(rawEvent.Type),
-														app.Text(" | "),
-														app.Span().Text(rawEvent.Name),
-														app.Text(" ("+rawEvent.Status.EventStatus+")"),
-														app.Br(),
-														app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
-															return app.Span().Text("Ring Group: " + parameters["PARAM_RING_GROUP_NAME"].Value)
-														}),
-														app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
-															return app.Br()
-														}),
-														app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
-															return app.Span().Text("Distribution ID: " + parameters["PARAM_DISTRIBUTION_ID"].Value)
-														}),
-														app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
-															return app.Br()
-														}),
-														app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
-															return app.Span().Text("Auto Attendant: " + parameters["PARAM_AUTO_ATTENDANT_NAME"].Value)
-														}),
-														app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
-															return app.Br()
-														}),
-														app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
-															return app.Span().Text("Duration: " + time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue)*time.Millisecond).String())
-														}),
-														app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
-															return app.Span().Text(" ")
-														}),
-														app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
-															return app.Span().Text("Ring Duration: " + time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue)*time.Millisecond).String())
-														}),
-														app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
-															return app.Span().Text(" ")
-														}),
-													)
-											}),
-										)
+							blazar.Form().
+								Body(
+									blazar.Input[string]().
+										Label("Start Time").
+										Clearable(true).
+										Type("date").
+										Bind(&c.startTimeString),
+									blazar.Input[string]().
+										Label("End Time").
+										Clearable(true).
+										Type("date").
+										Bind(&c.endTimeString),
+									blazar.Input[uint]().
+										Label("Max Results").
+										Bind(&c.maxResults),
+								).
+								Action(blazar.FormAction{
+									Name:     "Search",
+									Function: c.search,
 								}),
-							),
-					)
+						),
+					app.If(c.errorMessage != "", func() app.UI {
+						return blazar.StatusBar().
+							Bad().
+							Text(c.errorMessage)
+					}),
+					app.If(len(c.calls) > 0, func() app.UI {
+						return app.Div().
+							Style("font-size", "0.8em").
+							Body(
+								app.H2().Text("Call Table"),
+								c.renderCallTable(c.calls),
+							)
+					}),
+					app.If(len(c.rawActivities) > 0, func() app.UI {
+						return blazar.Collapse().
+							Label("Debug").
+							Open(false).
+							Body(
+								app.Div().
+									Style("font-size", "0.8em").
+									Body(
+										app.H2().Text("Calls"),
+										c.renderCalls(c.calls),
+									),
+								app.Div().
+									Style("font-size", "0.8em").
+									Body(
+										app.H2().Text("Raw Activities"),
+										app.Range(c.rawActivities).Slice(func(i int) app.UI {
+											rawActivity := c.rawActivities[i]
+
+											return app.Div().
+												Body(
+													app.Span().Text(rawActivity.Id.Time),
+													app.Text(" "),
+													app.Span().Text(rawActivity.Actor.Email),
+													app.Text(" "),
+													app.Span().Text(fmt.Sprintf("Events: (%d)", len(rawActivity.Events))),
+													app.Range(rawActivity.Events).Slice(func(i int) app.UI {
+														rawEvent := rawActivity.Events[i]
+														parameters := map[string]*admin.ActivityEventsParameters{}
+														for _, parameter := range rawEvent.Parameters {
+															parameters[parameter.Name] = parameter
+														}
+
+														if rawEvent.Type == "EVENT_TYPE_PBX_AUTO_ATTENDANT" && rawEvent.Name == "AUTO_ATTENDANT_PUBLISHED" {
+															return nil
+														}
+
+														return app.Div().
+															Style("padding-left", "1em").
+															Body(
+																app.Span().Text(parameters["PARAM_SOURCE"].Value+" -> "+parameters["PARAM_DESTINATION"].Value),
+																app.Br(),
+																app.Span().Text(rawEvent.Type),
+																app.Text(" | "),
+																app.Span().Text(rawEvent.Name),
+																app.Text(" ("+rawEvent.Status.EventStatus+")"),
+																app.Br(),
+																app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
+																	return app.Span().Text("Ring Group: " + parameters["PARAM_RING_GROUP_NAME"].Value)
+																}),
+																app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
+																	return app.Br()
+																}),
+																app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
+																	return app.Span().Text("Distribution ID: " + parameters["PARAM_DISTRIBUTION_ID"].Value)
+																}),
+																app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
+																	return app.Br()
+																}),
+																app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
+																	return app.Span().Text("Auto Attendant: " + parameters["PARAM_AUTO_ATTENDANT_NAME"].Value)
+																}),
+																app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
+																	return app.Br()
+																}),
+																app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
+																	return app.Span().Text("Duration: " + time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue)*time.Millisecond).String())
+																}),
+																app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
+																	return app.Span().Text(" ")
+																}),
+																app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
+																	return app.Span().Text("Ring Duration: " + time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue)*time.Millisecond).String())
+																}),
+																app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
+																	return app.Span().Text(" ")
+																}),
+															)
+													}),
+												)
+										}),
+									),
+							)
+					}),
+				}
 			}),
 		)
 }
@@ -659,10 +663,7 @@ func (c *CallsPage) refreshToken(ctx app.Context) {
 		return
 	}
 
-	params := map[string]any{
-		"prompt": "",
-	}
-	c.authClient.Call("requestAccessToken", params)
+	c.authClient.RequestAccessToken(googleoauthjs.WithOverridablePrompt(googleoauthjs.PromptEmptyString))
 }
 
 func (c *CallsPage) logout(ctx app.Context) {
