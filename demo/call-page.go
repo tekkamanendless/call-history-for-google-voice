@@ -309,6 +309,7 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 		Duration        time.Duration
 		Result          string
 		ResultUser      string
+		Icons           []string
 		Calls           []*Call
 	}
 
@@ -329,6 +330,7 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 		}
 
 		message := call.EventType == "EVENT_TYPE_MSG"
+		ringGroup := false
 		voicemail := false
 		incomplete := false
 		resultUser := ""
@@ -338,6 +340,9 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 				break
 			}
 
+			if call.RingGroup {
+				ringGroup = true
+			}
 			if call.RingGroup {
 				incomplete = true
 			}
@@ -372,6 +377,47 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			row.Result = "CONNECTED"
 		}
 		row.ResultUser = resultUser
+
+		switch row.Direction {
+		case "IN":
+			switch call.EventType {
+			case "EVENT_TYPE_PBX_RING_GROUP":
+				row.Icons = append(row.Icons, "user-group")
+			case "EVENT_TYPE_PBX_AUTO_ATTENDANT":
+				row.Icons = append(row.Icons, "tty")
+			case "EVENT_TYPE_CALL":
+				row.Icons = append(row.Icons, "phone")
+			}
+
+			if ringGroup {
+				row.Icons = append(row.Icons, "user-group")
+			}
+
+			if voicemail {
+				row.Icons = append(row.Icons, "voicemail")
+			} else if incomplete {
+				row.Icons = append(row.Icons, "phone-slash")
+			} else if call.CallDuration > 0 {
+				if len(call.Calls) > 0 {
+					row.Icons = append(row.Icons, "phone-volume")
+				}
+			}
+
+			if message {
+				row.Icons = append(row.Icons, "message")
+			}
+		case "OUT":
+			if message {
+				row.Icons = append(row.Icons, "message")
+			} else if voicemail {
+				row.Icons = append(row.Icons, "voicemail")
+			} else if incomplete {
+				row.Icons = append(row.Icons, "phone-slash")
+			} else if call.CallDuration > 0 {
+				row.Icons = append(row.Icons, "phone-volume")
+			}
+		}
+
 		rows = append(rows, row)
 	}
 
@@ -399,6 +445,22 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 					return blazar.Icon().
 						Class("direction-" + row.Direction).
 						Icon(icon)
+				},
+			},
+			{
+				Name: "Icons",
+				Value: func(row Row) any {
+					return app.Div().
+						Body(
+							app.Range(row.Icons).Slice(func(i int) app.UI {
+								icon := row.Icons[i]
+								return blazar.Icon().
+									Style("width", "1em").
+									Style("height", "1em").
+									Style("margin-right", "0.5em").
+									Icon(icon)
+							}),
+						)
 				},
 			},
 			{
