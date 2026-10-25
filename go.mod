@@ -3,7 +3,7 @@ module github.com/tekkamanendless/call-history-for-google-voice
 go 1.26.2
 
 require (
-	github.com/go-app-blazar/blazar v0.1.52
+	github.com/go-app-blazar/blazar v0.2.1
 	github.com/go-app-blazar/router v0.1.2
 	github.com/joho/godotenv v1.5.1
 	github.com/lmittmann/tint v1.1.3
@@ -41,3 +41,5 @@ require (
 )
 
 replace github.com/maxence-charriere/go-app/v11 => github.com/tekkamanendless/fork-of-maxence-charriere-go-app/v11 v11.0.0-20260624062618-c2f3e531f36d
+
+//replace github.com/go-app-blazar/blazar => ../../go-app-blazar/blazar

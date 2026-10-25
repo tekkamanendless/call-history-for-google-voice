@@ -10,8 +10,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
-github.com/go-app-blazar/blazar v0.1.52 h1:HycVJrXS/novJmJTeKNSg13M2347B5edGjnATjgw9rw=
-github.com/go-app-blazar/blazar v0.1.52/go.mod h1:XQSXQ4cw64Levy6uZmjGzk9/T9+tyC0uI0at0yY+ioE=
+github.com/go-app-blazar/blazar v0.2.1 h1:9gaetqAGpvhnBXLceIkIWIw/jl0oJZ2wSnLNzhRxSnE=
+github.com/go-app-blazar/blazar v0.2.1/go.mod h1:XQSXQ4cw64Levy6uZmjGzk9/T9+tyC0uI0at0yY+ioE=
 github.com/go-app-blazar/router v0.1.2 h1:dKy+a3MZqKG/GNQ+Dg/3wcEVoIy4x4qwgdph02OvIOU=
 github.com/go-app-blazar/router v0.1.2/go.mod h1:yY7DcUn3ToFdcNAGeyx0v8LjikiTu3WJ1XkQiEIlJRY=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
