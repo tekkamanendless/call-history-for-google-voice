@@ -28,10 +28,13 @@ type CallsPage struct {
 
 	errorMessage string
 
-	timezone      *time.Location
-	authClient    *googleoauthjs.TokenClient
-	userInfo      *googleoauth2.Userinfo
-	adminClient   *admin.Service
+	timezone    *time.Location
+	authClient  *googleoauthjs.TokenClient
+	userInfo    *googleoauth2.Userinfo
+	adminClient *admin.Service
+
+	searching     bool
+	searched      bool
 	rawActivities []*admin.Activity
 	calls         []*Call
 }
@@ -186,12 +189,20 @@ func (c *CallsPage) Render() app.UI {
 									Function: c.search,
 								}),
 						),
+					blazar.ProgressBar().
+						Style("visibility", func() string {
+							if c.searching {
+								return "visible"
+							}
+							return "hidden"
+						}()).
+						Indeterminate(true),
 					app.If(c.errorMessage != "", func() app.UI {
 						return blazar.StatusBar().
 							Bad().
 							Text(c.errorMessage)
 					}),
-					app.If(len(c.calls) > 0, func() app.UI {
+					app.If(c.searched, func() app.UI {
 						return app.Div().
 							Style("font-size", "0.8em").
 							Body(
@@ -199,7 +210,7 @@ func (c *CallsPage) Render() app.UI {
 								c.renderCallTable(c.calls),
 							)
 					}),
-					app.If(len(c.rawActivities) > 0, func() app.UI {
+					app.If(c.searched, func() app.UI {
 						return blazar.Collapse().
 							Label("Debug").
 							Open(false).
@@ -686,22 +697,37 @@ func (c *CallsPage) search(ctx app.Context) {
 		c.refreshToken(ctx)
 	}
 
+	var startTime *time.Time
+	var endTime *time.Time
+
+	if c.startTimeString != "" {
+		t, err := time.Parse(time.DateOnly, c.startTimeString)
+		if err != nil {
+			slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
+			return
+		}
+		startTime = &t
+	}
+	if c.endTimeString != "" {
+		t, err := time.Parse(time.DateOnly, c.endTimeString)
+		if err != nil {
+			slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
+			return
+		}
+		endTime = &t
+	}
+
+	ctx.Dispatch(func(ctx app.Context) {
+		c.searching = true
+		ctx.Update()
+	})
+
 	ctx.Async(func() {
 		call := c.adminClient.Activities.List("all", "voice")
-		if c.startTimeString != "" {
-			startTime, err := time.Parse(time.DateOnly, c.startTimeString)
-			if err != nil {
-				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
-				return
-			}
+		if startTime != nil {
 			call = call.StartTime(startTime.Format(time.RFC3339Nano))
 		}
-		if c.endTimeString != "" {
-			endTime, err := time.Parse(time.DateOnly, c.endTimeString)
-			if err != nil {
-				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
-				return
-			}
+		if endTime != nil {
 			call = call.EndTime(endTime.Format(time.RFC3339Nano))
 		}
 		if c.maxResults > 0 {
@@ -721,6 +747,10 @@ func (c *CallsPage) search(ctx app.Context) {
 				}
 
 				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
+				ctx.Dispatch(func(ctx app.Context) {
+					c.searching = false
+					ctx.Update()
+				})
 				return
 			}
 			slog.InfoContext(ctx.Context, "CallPage: search: activities", "activities", len(activities.Items))
@@ -734,6 +764,8 @@ func (c *CallsPage) search(ctx app.Context) {
 		}
 
 		ctx.Dispatch(func(ctx app.Context) {
+			c.searching = false
+			c.searched = true
 			c.rawActivities = rawActivities
 			c.calls = parseCalls(ctx.Context, rawActivities)
 			ctx.Update()
