@@ -24,7 +24,6 @@ type CallsPage struct {
 
 	startTimeString string
 	endTimeString   string
-	maxResults      uint
 
 	errorMessage string
 
@@ -35,14 +34,14 @@ type CallsPage struct {
 
 	searching     bool
 	searched      bool
-	rawActivities []*admin.Activity
-	calls         []*Call
+	rawActivities []*admin.Activity // Debug
+	calls         []*Call           // Debug
+	callRows      []CallRow
 }
 
 func (c *CallsPage) OnMount(ctx app.Context) {
 	slog.InfoContext(ctx.Context, "CallPage: OnMount")
 
-	c.maxResults = 0
 	c.startTimeString = time.Now().Add(-1 * time.Hour * 24).Format(time.DateOnly)
 	//c.endTime = time.Now()
 	c.timezone = time.Local
@@ -180,9 +179,6 @@ func (c *CallsPage) Render() app.UI {
 										Clearable(true).
 										Type("date").
 										Bind(&c.endTimeString),
-									blazar.Input[uint]().
-										Label("Max Results").
-										Bind(&c.maxResults),
 								).
 								Action(blazar.FormAction{
 									Name:     "Search",
@@ -207,7 +203,7 @@ func (c *CallsPage) Render() app.UI {
 							Style("font-size", "0.8em").
 							Body(
 								app.H2().Text("Call Table"),
-								c.renderCallTable(c.calls),
+								c.renderCallTable(c.callRows),
 							)
 					}),
 					app.If(c.searched, func() app.UI {
@@ -298,145 +294,71 @@ func (c *CallsPage) Render() app.UI {
 		)
 }
 
-func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
-	type Row struct {
-		Time            time.Time
-		Direction       string
-		Source          string
-		SourceName      string
-		Destination     string
-		DestinationName string
-		Duration        time.Duration
-		Result          string
-		ResultUser      string
-		Icons           []string
-		Calls           []*Call
+const (
+	DirectionIn  = "in"
+	DirectionOut = "out"
+)
+
+const (
+	SequenceAutoAttendant = "auto-attendant" // Initial/intermediate state.
+	SequenceRingGroup     = "ring-group"     // Initial/intermediate state.
+	SequencePhone         = "phone"          // Initial/intermediate state.
+	SequenceMessage       = "message"        // Final state.
+	SequenceVoicemail     = "voicemail"      // Final state.
+	SequenceIncomplete    = "incomplete"     // Final state.
+	SequenceConnected     = "connected"      // Final state.
+)
+
+func sequenceItemToIcon(item string) string {
+	switch item {
+	case SequenceAutoAttendant:
+		return "tty"
+	case SequenceRingGroup:
+		return "user-group"
+	case SequencePhone:
+		return "phone"
+	case SequenceMessage:
+		return "message"
+	case SequenceVoicemail:
+		return "voicemail"
+	case SequenceIncomplete:
+		return "phone-slash"
+	case SequenceConnected:
+		return "phone-volume"
 	}
+	return item
+}
 
-	rows := []Row{}
-	for _, call := range calls {
-		row := Row{
-			Time:            call.Time,
-			Source:          call.Source,
-			SourceName:      call.SourceName,
-			Destination:     call.Destination,
-			DestinationName: call.DestinationName,
-			Duration:        call.CallDuration,
-		}
-		if strings.Contains(call.EventName, "INCOMING") || call.EventName == "MSG_RECEIVED" {
-			row.Direction = "IN"
-		} else if strings.Contains(call.EventName, "OUTGOING") || call.EventName == "MSG_SENT" {
-			row.Direction = "OUT"
-		}
+type CallRow struct {
+	Time            time.Time     // The time of the call.
+	Direction       string        // The direction of the call.
+	Source          string        // The source phone number.
+	SourceName      string        // The name of the source.
+	Destination     string        // The destination phone number.
+	DestinationName string        // The name of the destination.
+	Duration        time.Duration // The duration of the call.
+	ResultUser      string
+	Sequence        []string // The sequence of states for the call.
+	Calls           []*Call  // The calls that are part of the call.
+}
 
-		message := call.EventType == "EVENT_TYPE_MSG"
-		ringGroup := false
-		voicemail := false
-		incomplete := false
-		resultUser := ""
-		for _, call := range call.Calls {
-			if call.EventName == "RING_GROUP_VOICEMAIL_RECEIVED" {
-				voicemail = true
-				break
-			}
-
-			if call.RingGroup {
-				ringGroup = true
-			}
-			if call.RingGroup {
-				incomplete = true
-			}
-
-			if call.CallDuration > 0 {
-				incomplete = false
-
-				switch row.Direction {
-				case "IN":
-					resultUser = call.DestinationName
-				}
-			}
-		}
-		if row.Direction == "OUT" {
-			resultUser = call.SourceName
-			if call.CallDuration == 0 {
-				incomplete = true
-			}
-		}
-		if message && row.Direction == "IN" {
-			resultUser = call.DestinationName
-		}
-
-		if message {
-			row.Result = "MESSAGE"
-		} else if voicemail {
-			row.Result = "VOICEMAIL"
-			resultUser = ""
-		} else if incomplete {
-			row.Result = "INCOMPLETE"
-		} else if call.CallDuration > 0 {
-			row.Result = "CONNECTED"
-		}
-		row.ResultUser = resultUser
-
-		switch row.Direction {
-		case "IN":
-			switch call.EventType {
-			case "EVENT_TYPE_PBX_RING_GROUP":
-				row.Icons = append(row.Icons, "user-group")
-			case "EVENT_TYPE_PBX_AUTO_ATTENDANT":
-				row.Icons = append(row.Icons, "tty")
-			case "EVENT_TYPE_CALL":
-				row.Icons = append(row.Icons, "phone")
-			}
-
-			if ringGroup {
-				row.Icons = append(row.Icons, "user-group")
-			}
-
-			if voicemail {
-				row.Icons = append(row.Icons, "voicemail")
-			} else if incomplete {
-				row.Icons = append(row.Icons, "phone-slash")
-			} else if call.CallDuration > 0 {
-				if len(call.Calls) > 0 {
-					row.Icons = append(row.Icons, "phone-volume")
-				}
-			}
-
-			if message {
-				row.Icons = append(row.Icons, "message")
-			}
-		case "OUT":
-			if message {
-				row.Icons = append(row.Icons, "message")
-			} else if voicemail {
-				row.Icons = append(row.Icons, "voicemail")
-			} else if incomplete {
-				row.Icons = append(row.Icons, "phone-slash")
-			} else if call.CallDuration > 0 {
-				row.Icons = append(row.Icons, "phone-volume")
-			}
-		}
-
-		rows = append(rows, row)
-	}
-
-	return blazar.Table[Row]().
-		Columns([]blazar.TableColumn[Row]{
+func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
+	return blazar.Table[CallRow]().
+		Columns([]blazar.TableColumn[CallRow]{
 			{
 				Name: "Time",
-				Value: func(row Row) any {
+				Value: func(row CallRow) any {
 					return row.Time.In(c.timezone).Format("2006-01-02 3:04:05pm")
 				},
 			},
 			{
 				Name: "Direction",
-				Value: func(row Row) any {
+				Value: func(row CallRow) any {
 					icon := ""
 					switch row.Direction {
-					case "IN":
+					case DirectionIn:
 						icon = "arrow-left"
-					case "OUT":
+					case DirectionOut:
 						icon = "arrow-right"
 					}
 					if icon == "" {
@@ -449,15 +371,18 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			},
 			{
 				Name: "Icons",
-				Value: func(row Row) any {
+				Value: func(row CallRow) any {
 					return app.Div().
 						Body(
-							app.Range(row.Icons).Slice(func(i int) app.UI {
-								icon := row.Icons[i]
+							app.Range(row.Sequence).Slice(func(i int) app.UI {
+								item := row.Sequence[i]
+								icon := sequenceItemToIcon(item)
 								return blazar.Icon().
 									Style("width", "1em").
 									Style("height", "1em").
 									Style("margin-right", "0.5em").
+									Class("result-" + item).
+									Title(item).
 									Icon(icon)
 							}),
 						)
@@ -465,7 +390,7 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			},
 			{
 				Name: "Source",
-				Value: func(row Row) any {
+				Value: func(row CallRow) any {
 					if row.Source == "" {
 						return ""
 					}
@@ -494,7 +419,7 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			},
 			{
 				Name: "Destination",
-				Value: func(row Row) any {
+				Value: func(row CallRow) any {
 					if row.Destination == "" {
 						return ""
 					}
@@ -523,7 +448,7 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			},
 			{
 				Name: "Duration",
-				Value: func(row Row) any {
+				Value: func(row CallRow) any {
 					if row.Duration == 0 {
 						return ""
 					}
@@ -532,35 +457,30 @@ func (c *CallsPage) renderCallTable(calls []*Call) app.UI {
 			},
 			{
 				Name: "Result",
-				Value: func(row Row) any {
-					icon := ""
-					switch row.Result {
-					case "CONNECTED":
-						icon = "phone-volume"
-					case "INCOMPLETE":
-						icon = "phone-slash"
-					case "VOICEMAIL":
-						icon = "voicemail"
-					case "MESSAGE":
-						icon = "message"
+				Value: func(row CallRow) any {
+					item := ""
+					if len(row.Sequence) > 0 {
+						item = row.Sequence[len(row.Sequence)-1]
 					}
+					icon := sequenceItemToIcon(item)
 					if icon == "" {
-						return row.Result
+						return ""
 					}
 
 					return blazar.Icon().
-						Class("result-" + row.Result).
+						Class("result-" + item).
+						Title(item).
 						Icon(icon)
 				},
 			},
 			{
 				Name: "Result User",
-				Value: func(row Row) any {
+				Value: func(row CallRow) any {
 					return row.ResultUser
 				},
 			},
 		}).
-		Rows(rows)
+		Rows(callRows)
 }
 
 func formatPhoneNumber(phoneNumber string) string {
@@ -574,6 +494,107 @@ func formatPhoneNumber(phoneNumber string) string {
 		}
 	}
 	return phoneNumber
+}
+
+func (c *CallsPage) buildCallRows(calls []*Call) []CallRow {
+	rows := []CallRow{}
+	for _, call := range calls {
+		row := CallRow{
+			Time:            call.Time,
+			Source:          call.Source,
+			SourceName:      call.SourceName,
+			Destination:     call.Destination,
+			DestinationName: call.DestinationName,
+			Duration:        call.CallDuration,
+		}
+		if strings.Contains(call.EventName, "INCOMING") || call.EventName == "MSG_RECEIVED" {
+			row.Direction = DirectionIn
+		} else if strings.Contains(call.EventName, "OUTGOING") || call.EventName == "MSG_SENT" {
+			row.Direction = DirectionOut
+		}
+
+		message := call.EventType == "EVENT_TYPE_MSG"
+		ringGroup := false
+		voicemail := false
+		incomplete := false
+		resultUser := ""
+		for _, call := range call.Calls {
+			if call.EventName == "RING_GROUP_VOICEMAIL_RECEIVED" {
+				voicemail = true
+				break
+			}
+
+			if call.RingGroup {
+				ringGroup = true
+			}
+			if call.RingGroup {
+				incomplete = true
+			}
+
+			if call.CallDuration > 0 {
+				incomplete = false
+
+				switch row.Direction {
+				case DirectionIn:
+					resultUser = call.DestinationName
+				}
+			}
+		}
+		if row.Direction == DirectionOut {
+			resultUser = call.SourceName
+			if call.CallDuration == 0 {
+				incomplete = true
+			}
+		}
+		if message && row.Direction == DirectionIn {
+			resultUser = call.DestinationName
+		}
+
+		row.ResultUser = resultUser
+
+		switch row.Direction {
+		case DirectionIn:
+			switch call.EventType {
+			case "EVENT_TYPE_PBX_RING_GROUP":
+				row.Sequence = append(row.Sequence, SequenceRingGroup)
+			case "EVENT_TYPE_PBX_AUTO_ATTENDANT":
+				row.Sequence = append(row.Sequence, SequenceAutoAttendant)
+			case "EVENT_TYPE_CALL":
+				row.Sequence = append(row.Sequence, SequencePhone)
+			}
+
+			if ringGroup {
+				row.Sequence = append(row.Sequence, SequenceRingGroup)
+			}
+
+			if voicemail {
+				row.Sequence = append(row.Sequence, SequenceVoicemail)
+			} else if incomplete {
+				row.Sequence = append(row.Sequence, SequenceIncomplete)
+			} else if call.CallDuration > 0 {
+				if len(call.Calls) > 0 {
+					row.Sequence = append(row.Sequence, SequenceConnected)
+				}
+			}
+
+			if message {
+				row.Sequence = append(row.Sequence, SequenceMessage)
+			}
+		case DirectionOut:
+			if message {
+				row.Sequence = append(row.Sequence, SequenceMessage)
+			} else if voicemail {
+				row.Sequence = append(row.Sequence, SequenceVoicemail)
+			} else if incomplete {
+				row.Sequence = append(row.Sequence, SequenceIncomplete)
+			} else if call.CallDuration > 0 {
+				row.Sequence = append(row.Sequence, SequenceConnected)
+			}
+		}
+
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func (c *CallsPage) renderCalls(calls []*Call) app.UI {
@@ -792,9 +813,6 @@ func (c *CallsPage) search(ctx app.Context) {
 		if endTime != nil {
 			call = call.EndTime(endTime.Format(time.RFC3339Nano))
 		}
-		if c.maxResults > 0 {
-			call = call.MaxResults(int64(c.maxResults))
-		}
 
 		rawActivities := []*admin.Activity{}
 		for {
@@ -830,6 +848,7 @@ func (c *CallsPage) search(ctx app.Context) {
 			c.searched = true
 			c.rawActivities = rawActivities
 			c.calls = parseCalls(ctx.Context, rawActivities)
+			c.callRows = c.buildCallRows(c.calls)
 			ctx.Update()
 		})
 	})
