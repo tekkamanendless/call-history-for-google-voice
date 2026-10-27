@@ -1,25 +1,33 @@
-.direction-IN {
+.direction-in {
   color: #008000;
 }
 
-.direction-OUT {
+.direction-out {
   color: #0000FF;
 }
 
-.result-CONNECTED {
+.result-auto-attendant {
+  color: #a4a4a4;
+}
+
+.result-connected {
   color: #008000;
 }
 
-.result-INCOMPLETE {
+.result-incomplete {
   color: #FF0000;
 }
 
-.result-VOICEMAIL {
-  color: #008000;
+.result-message {
+  color: #0000FF;
 }
 
-.result-MESSAGE {
-  color: #0000FF;
+.result-ring-group {
+  color: #a4a4a4;
+}
+
+.result-voicemail {
+  color: #008000;
 }
 
 .destination .name {
