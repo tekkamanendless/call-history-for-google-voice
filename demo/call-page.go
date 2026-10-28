@@ -62,8 +62,11 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		var token oauth2.Token
 		ctx.GetState("user-token", &token)
 		if token.AccessToken != "" {
-			slog.InfoContext(ctx.Context, "CallPage: OnMount: callback: saved token", "token", token)
-			c.loginWithToken(ctx, token)
+			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token", "token", token)
+			err := c.loginWithToken(ctx, token)
+			if err != nil {
+				slog.ErrorContext(ctx.Context, "CallPage: OnMount: Could not log in with saved token.", "err", err)
+			}
 		}
 	}
 
@@ -701,7 +704,7 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 	})
 }
 
-func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) {
+func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) error {
 	tokenSource := oauth2.StaticTokenSource(&token)
 	//oauthClient := oauth2.NewClient(ctx, tokenSource)
 	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: tokenSource", "tokenSource", tokenSource)
@@ -709,7 +712,7 @@ func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) {
 	googleOauthClient, err := googleoauth2.NewService(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
 		slog.ErrorContext(ctx.Context, "CallPage: loginWithToken: error", "err", err)
-		return
+		return fmt.Errorf("failed to create google oauth client: %w", err)
 	}
 
 	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: googleOauthClient", "googleOauthClient", googleOauthClient)
@@ -725,7 +728,7 @@ func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) {
 			}
 		}
 
-		return
+		return fmt.Errorf("failed to get user info: %w", err)
 	}
 	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: userInfo", "userInfo", userInfo)
 	c.userInfo = userInfo
@@ -733,10 +736,12 @@ func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) {
 	adminClient, err := admin.NewService(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
 		slog.ErrorContext(ctx.Context, "CallPage: loginWithToken: could not create admin client", "err", err)
-		return
+		return fmt.Errorf("failed to create admin client: %w", err)
 	}
 	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: adminClient", "adminClient", adminClient)
 	c.adminClient = adminClient
+
+	return nil
 }
 
 func (c *CallsPage) tokenIsExpired(ctx app.Context) bool {
@@ -750,14 +755,26 @@ func (c *CallsPage) tokenIsExpired(ctx app.Context) bool {
 	return false
 }
 
-func (c *CallsPage) refreshToken(ctx app.Context) {
+func (c *CallsPage) refreshToken(ctx app.Context) error {
 	slog.InfoContext(ctx.Context, "CallPage: refreshToken")
 	if c.authClient == nil {
 		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: authClient is nil")
-		return
+		return fmt.Errorf("authClient is nil")
 	}
 
-	c.authClient.RequestAccessToken(googleoauthjs.WithOverridablePrompt(googleoauthjs.PromptEmptyString))
+	err := c.authClient.RequestAccessToken(googleoauthjs.WithOverridablePrompt(googleoauthjs.PromptEmptyString))
+	if err != nil {
+		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: error", "err", err)
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	err = c.loginWithToken(ctx, c.authClient.Token())
+	if err != nil {
+		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: error", "err", err)
+		return fmt.Errorf("failed to login with token: %w", err)
+	}
+
+	return nil
 }
 
 func (c *CallsPage) logout(ctx app.Context) {
@@ -773,11 +790,6 @@ func (c *CallsPage) search(ctx app.Context) {
 	if c.adminClient == nil {
 		slog.InfoContext(ctx.Context, "CallPage: search: adminClient is nil")
 		return
-	}
-
-	if c.tokenIsExpired(ctx) {
-		slog.InfoContext(ctx.Context, "CallPage: search: token is expired")
-		c.refreshToken(ctx)
 	}
 
 	var startTime *time.Time
@@ -802,10 +814,21 @@ func (c *CallsPage) search(ctx app.Context) {
 
 	ctx.Dispatch(func(ctx app.Context) {
 		c.searching = true
-		ctx.Update()
 	})
 
 	ctx.Async(func() {
+		if c.tokenIsExpired(ctx) {
+			slog.InfoContext(ctx.Context, "CallPage: search: token is expired")
+			err := c.refreshToken(ctx)
+			if err != nil {
+				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
+				ctx.Dispatch(func(ctx app.Context) {
+					c.searching = false
+				})
+				return
+			}
+		}
+
 		call := c.adminClient.Activities.List("all", "voice")
 		if startTime != nil {
 			call = call.StartTime(startTime.Format(time.RFC3339Nano))
@@ -849,7 +872,6 @@ func (c *CallsPage) search(ctx app.Context) {
 			c.rawActivities = rawActivities
 			c.calls = parseCalls(ctx.Context, rawActivities)
 			c.callRows = c.buildCallRows(c.calls)
-			ctx.Update()
 		})
 	})
 }
