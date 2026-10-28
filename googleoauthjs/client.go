@@ -2,6 +2,7 @@ package googleoauthjs
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -12,10 +13,12 @@ import (
 
 // TokenClient is a client for the Google OAuth2 API that provides a token back to the user.
 type TokenClient struct {
-	ctx           context.Context    // This is the context to use for background operations.
-	client        app.Value          // This is the JavaScript Google OAuth2 client.
-	callback      func(oauth2.Token) // This is the callback to use when a token is received.
-	errorCallback func(error)        // This is the callback to use when an error occurs.
+	ctx            context.Context    // This is the context to use for background operations.
+	client         app.Value          // This is the JavaScript Google OAuth2 client.
+	callback       func(oauth2.Token) // This is the callback to use when a token is received.
+	errorCallback  func(error)        // This is the callback to use when an error occurs.
+	connectChannel chan error         // This is the channel to use when a connection is established.
+	currentToken   oauth2.Token       // This is the current token.
 }
 
 // TokenClientConfig is a configuration for the TokenClient.
@@ -158,6 +161,9 @@ func NewTokenClient(ctx context.Context, opts ...TokenClientOption) *TokenClient
 func (c *TokenClient) jsCallback(this app.Value, args []app.Value) any {
 	slog.InfoContext(c.ctx, "TokenClient: jsCallback", "args", len(args))
 	if len(args) == 0 {
+		if c.connectChannel != nil {
+			c.connectChannel <- fmt.Errorf("no arguments received")
+		}
 		return nil
 	}
 
@@ -170,9 +176,14 @@ func (c *TokenClient) jsCallback(this app.Value, args []app.Value) any {
 		Expiry:      time.Now().Add(time.Duration(info.Get("expires_in").Int()) * time.Second),
 		TokenType:   info.Get("token_type").String(),
 	}
+	c.currentToken = token
 
 	if c.callback != nil {
 		c.callback(token)
+	}
+
+	if c.connectChannel != nil {
+		c.connectChannel <- nil
 	}
 
 	return nil
@@ -201,7 +212,16 @@ func (c *TokenClient) jsErrorCallback(this app.Value, args []app.Value) any {
 		c.errorCallback(e)
 	}
 
+	if c.connectChannel != nil {
+		c.connectChannel <- e
+	}
+
 	return nil
+}
+
+// Token returns the current token.
+func (c *TokenClient) Token() oauth2.Token {
+	return c.currentToken
 }
 
 // OverridableTokenClientConfig is a configuration for the OverridableTokenClient.
@@ -245,7 +265,7 @@ func WithOverridableLoginHint(loginHint string) OverridableTokenClientConfigOpti
 
 // RequestAccessToken requests an access token from the Google OAuth2 API.
 // Any additional overrides may be specified, but it will work without any.
-func (c *TokenClient) RequestAccessToken(opts ...OverridableTokenClientConfigOption) any {
+func (c *TokenClient) RequestAccessToken(opts ...OverridableTokenClientConfigOption) error {
 	cfg := &OverridableTokenClientConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -265,5 +285,16 @@ func (c *TokenClient) RequestAccessToken(opts ...OverridableTokenClientConfigOpt
 		jsConfig.Set("login_hint", *cfg.LoginHint)
 	}
 
-	return c.client.Call("requestAccessToken", jsConfig)
+	c.connectChannel = make(chan error, 1) // This is the channel to use when a connection is established.
+
+	c.client.Call("requestAccessToken", jsConfig)
+
+	err := <-c.connectChannel
+	close(c.connectChannel)
+	c.connectChannel = nil
+	if err != nil {
+		return fmt.Errorf("failed to request access token: %w", err)
+	}
+
+	return nil
 }
