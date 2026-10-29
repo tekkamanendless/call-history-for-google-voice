@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-app-blazar/blazar/blazar"
+	"github.com/go-app-blazar/blazar/htmlevent"
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
 	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
 	"golang.org/x/oauth2"
@@ -32,11 +33,21 @@ type CallsPage struct {
 	userInfo    *googleoauth2.Userinfo
 	adminClient *admin.Service
 
-	searching     bool
-	searched      bool
-	rawActivities []*admin.Activity // Debug
-	calls         []*Call           // Debug
-	callRows      []CallRow
+	searching                 bool
+	searched                  bool
+	rawActivities             []*admin.Activity // Debug
+	calls                     []*Call           // Debug
+	callRows                  []CallRow
+	filteredCallRows          []CallRow
+	filterInbound             bool
+	filterOutbound            bool
+	filterResultConnected     bool
+	filterResultIncomplete    bool
+	filterResultAutoAttendant bool
+	filterResultRingGroup     bool
+	filterResultPhone         bool
+	filterResultMessage       bool
+	filterResultVoicemail     bool
 }
 
 func (c *CallsPage) OnMount(ctx app.Context) {
@@ -120,7 +131,7 @@ func (c *CallsPage) Render() app.UI {
 						blazar.Button().
 							Label("Sign in with Google").
 							Icon("google fa-brands").
-							On("click", func(ctx app.Context, e app.Event) {
+							OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 								c.authClient.RequestAccessToken()
 							}),
 					)
@@ -136,9 +147,9 @@ func (c *CallsPage) Render() app.UI {
 				return app.Div().
 					Body(
 						blazar.Button().
-							Label("Log out as "+c.userInfo.Name).
+							Label("Log out as " + c.userInfo.Name).
 							Icon("right-from-bracket").
-							On("click", func(ctx app.Context, e app.Event) {
+							OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 								c.logout(ctx)
 								ctx.Update()
 							}),
@@ -207,7 +218,8 @@ func (c *CallsPage) Render() app.UI {
 							Style("font-size", "0.8em").
 							Body(
 								app.H2().Text("Call Table"),
-								c.renderCallTable(c.callRows),
+								c.renderCallFilter(),
+								c.renderCallTable(c.filteredCallRows),
 							)
 					}),
 					app.If(c.searched, func() app.UI {
@@ -344,6 +356,99 @@ type CallRow struct {
 	ResultUser      string
 	Sequence        []string // The sequence of states for the call.
 	Calls           []*Call  // The calls that are part of the call.
+}
+
+func (c *CallsPage) renderCallFilter() app.UI {
+	return app.Div().
+		Body(
+			blazar.Button().
+				Icon("arrow-left").
+				Label("Inbound").
+				Outline(!c.filterInbound).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterInbound = !c.filterInbound
+					c.filterOutbound = false
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			blazar.Button().
+				Icon("arrow-right").
+				Label("Outbound").
+				Outline(!c.filterOutbound).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterInbound = false
+					c.filterOutbound = !c.filterOutbound
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			app.Span().
+				Text(" ").
+				Style("width", "1em").
+				Style("display", "inline-block"),
+			blazar.Button().
+				Icon(sequenceItemToIcon(SequenceAutoAttendant)).
+				Label("Auto Attendant").
+				Outline(!c.filterResultAutoAttendant).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterResultAutoAttendant = !c.filterResultAutoAttendant
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			blazar.Button().
+				Icon(sequenceItemToIcon(SequenceRingGroup)).
+				Label("Ring Group").
+				Outline(!c.filterResultRingGroup).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterResultRingGroup = !c.filterResultRingGroup
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			blazar.Button().
+				Icon(sequenceItemToIcon(SequencePhone)).
+				Label("Phone").
+				Outline(!c.filterResultPhone).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterResultPhone = !c.filterResultPhone
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			blazar.Button().
+				Icon(sequenceItemToIcon(SequenceMessage)).
+				Label("Message").
+				Outline(!c.filterResultMessage).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterResultMessage = !c.filterResultMessage
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			blazar.Button().
+				Icon(sequenceItemToIcon(SequenceVoicemail)).
+				Label("Voicemail").
+				Outline(!c.filterResultVoicemail).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterResultVoicemail = !c.filterResultVoicemail
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			blazar.Button().
+				Icon(sequenceItemToIcon(SequenceIncomplete)).
+				Label("Incomplete").
+				Outline(!c.filterResultIncomplete).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterResultIncomplete = !c.filterResultIncomplete
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+			blazar.Button().
+				Icon(sequenceItemToIcon(SequenceConnected)).
+				Label("Connected").
+				Outline(!c.filterResultConnected).
+				OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+					c.filterResultConnected = !c.filterResultConnected
+					c.filteredCallRows = c.filterCallRows(c.callRows)
+					ctx.Update()
+				}),
+		)
 }
 
 func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
@@ -876,6 +981,7 @@ func (c *CallsPage) search(ctx app.Context) {
 			c.rawActivities = rawActivities
 			c.calls = parseCalls(ctx.Context, rawActivities)
 			c.callRows = c.buildCallRows(c.calls)
+			c.filteredCallRows = c.filterCallRows(c.callRows)
 		})
 	})
 }
@@ -1015,4 +1121,54 @@ func aggregateCalls(calls []*Call) []*Call {
 		aggregatedCalls = append(aggregatedCalls, call)
 	}
 	return aggregatedCalls
+}
+
+func (c *CallsPage) filterCallRows(callRows []CallRow) []CallRow {
+	filteredCallRows := []CallRow{}
+
+	var allowedFinalStates []string
+	{
+		if c.filterResultAutoAttendant {
+			allowedFinalStates = append(allowedFinalStates, SequenceAutoAttendant)
+		}
+		if c.filterResultRingGroup {
+			allowedFinalStates = append(allowedFinalStates, SequenceRingGroup)
+		}
+		if c.filterResultPhone {
+			allowedFinalStates = append(allowedFinalStates, SequencePhone)
+		}
+		if c.filterResultMessage {
+			allowedFinalStates = append(allowedFinalStates, SequenceMessage)
+		}
+		if c.filterResultVoicemail {
+			allowedFinalStates = append(allowedFinalStates, SequenceVoicemail)
+		}
+		if c.filterResultIncomplete {
+			allowedFinalStates = append(allowedFinalStates, SequenceIncomplete)
+		}
+		if c.filterResultConnected {
+			allowedFinalStates = append(allowedFinalStates, SequenceConnected)
+		}
+	}
+
+	for _, callRow := range callRows {
+		if c.filterInbound && callRow.Direction != DirectionIn {
+			continue
+		}
+		if c.filterOutbound && callRow.Direction != DirectionOut {
+			continue
+		}
+
+		if len(allowedFinalStates) > 0 {
+			if len(callRow.Sequence) == 0 {
+				continue
+			}
+			if !slices.Contains(allowedFinalStates, callRow.Sequence[len(callRow.Sequence)-1]) {
+				continue
+			}
+		}
+
+		filteredCallRows = append(filteredCallRows, callRow)
+	}
+	return filteredCallRows
 }
