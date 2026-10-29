@@ -30,10 +30,18 @@
   color: #008000;
 }
 
-.destination .name {
-  font-size: 0.8em;
+.call-side-container {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5em;
+  align-items: center;
 }
 
-.source .name {
-  font-size: 0.8em;
+.call-side {
+  display: flex;
+  flex-direction: column;
+
+  .name {
+    font-size: 0.8em;
+  }
 }
