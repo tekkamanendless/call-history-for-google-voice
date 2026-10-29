@@ -89,6 +89,7 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 	c.authClient = googleoauthjs.NewTokenClient(ctx.Context,
 		googleoauthjs.WithClientID("531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com"),
 		googleoauthjs.WithScopes([]string{
+			"email",
 			"profile",
 			"https://www.googleapis.com/auth/admin.reports.audit.readonly",
 		}),
@@ -762,7 +763,10 @@ func (c *CallsPage) refreshToken(ctx app.Context) error {
 		return fmt.Errorf("authClient is nil")
 	}
 
-	err := c.authClient.RequestAccessToken(googleoauthjs.WithOverridablePrompt(googleoauthjs.PromptEmptyString))
+	err := c.authClient.RequestAccessToken(
+		googleoauthjs.WithOverridablePrompt(googleoauthjs.PromptEmptyString),
+		googleoauthjs.WithOverridableLoginHint(c.userInfo.Id),
+	)
 	if err != nil {
 		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: error", "err", err)
 		return fmt.Errorf("failed to refresh token: %w", err)
