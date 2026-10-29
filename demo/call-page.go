@@ -48,6 +48,7 @@ type CallsPage struct {
 	filterResultPhone         bool
 	filterResultMessage       bool
 	filterResultVoicemail     bool
+	filterPhoneNumber         string
 }
 
 func (c *CallsPage) OnMount(ctx app.Context) {
@@ -459,6 +460,25 @@ func (c *CallsPage) renderCallFilter() app.UI {
 		)
 }
 
+func (c *CallsPage) renderCallSide(side string, phoneNumber string, name string) app.UI {
+	body := []app.UI{}
+	if name != "" {
+		body = append(body,
+			app.Span().
+				Class("name").
+				Text(name),
+		)
+	}
+	body = append(body,
+		blazar.Copy().
+			Value(formatPhoneNumber(phoneNumber)).
+			Text(formatPhoneNumber(phoneNumber)),
+	)
+	return app.Div().
+		Class("call-side " + side).
+		Body(body...)
+}
+
 func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 	return blazar.Table[CallRow]().
 		Columns([]blazar.TableColumn[CallRow]{
@@ -511,27 +531,33 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 					if row.Source == "" {
 						return ""
 					}
-					body := []app.UI{}
-					if row.SourceName != "" {
-						body = append(body,
-							app.Span().
-								Class("name").
-								Text(row.SourceName),
-						)
-					}
-					if len(body) > 0 {
-						body = append(body,
-							app.Br(),
-						)
-					}
-					body = append(body,
-						blazar.Copy().
-							Value(formatPhoneNumber(row.Source)).
-							Text(formatPhoneNumber(row.Source)),
-					)
 					return app.Div().
-						Class("source").
-						Body(body...)
+						Class("call-side-container").
+						Body(
+							c.renderCallSide("source", row.Source, row.SourceName),
+							blazar.Icon().
+								Class("filter-icon").
+								Icon("filter").
+								Style("cursor", "pointer").
+								Style("color", func() string {
+									if c.filterPhoneNumber == row.Source {
+										return "var(--blazar-theme-primary)"
+									}
+									return "lightgray"
+								}()).
+								DataSet("phone-number", row.Source).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									phoneNumber := e.Target.Call("closest", ".filter-icon").Get("dataset").Get("phoneNumber").String()
+
+									if c.filterPhoneNumber == phoneNumber {
+										c.filterPhoneNumber = ""
+									} else {
+										c.filterPhoneNumber = phoneNumber
+									}
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+						)
 				},
 			},
 			{
@@ -540,27 +566,33 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 					if row.Destination == "" {
 						return ""
 					}
-					body := []app.UI{}
-					if row.DestinationName != "" {
-						body = append(body,
-							app.Span().
-								Class("name").
-								Text(row.DestinationName),
-						)
-					}
-					if len(body) > 0 {
-						body = append(body,
-							app.Br(),
-						)
-					}
-					body = append(body,
-						blazar.Copy().
-							Value(formatPhoneNumber(row.Destination)).
-							Text(formatPhoneNumber(row.Destination)),
-					)
 					return app.Div().
-						Class("destination").
-						Body(body...)
+						Class("call-side-container").
+						Body(
+							c.renderCallSide("destination", row.Destination, row.DestinationName),
+							blazar.Icon().
+								Class("filter-icon").
+								Icon("filter").
+								Style("cursor", "pointer").
+								Style("color", func() string {
+									if c.filterPhoneNumber == row.Destination {
+										return "var(--blazar-theme-primary)"
+									}
+									return "lightgray"
+								}()).
+								DataSet("phone-number", row.Destination).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									phoneNumber := e.Target.Call("closest", ".filter-icon").Get("dataset").Get("phoneNumber").String()
+
+									if c.filterPhoneNumber == phoneNumber {
+										c.filterPhoneNumber = ""
+									} else {
+										c.filterPhoneNumber = phoneNumber
+									}
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+						)
 				},
 			},
 			{
@@ -1172,6 +1204,12 @@ func (c *CallsPage) filterCallRows(callRows []CallRow) []CallRow {
 				continue
 			}
 			if !slices.Contains(allowedFinalStates, callRow.Sequence[len(callRow.Sequence)-1]) {
+				continue
+			}
+		}
+
+		if c.filterPhoneNumber != "" {
+			if callRow.Source != c.filterPhoneNumber && callRow.Destination != c.filterPhoneNumber {
 				continue
 			}
 		}
