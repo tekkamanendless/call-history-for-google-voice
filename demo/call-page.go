@@ -368,110 +368,113 @@ func (c *CallsPage) renderCallFilter() app.UI {
 		Body(
 			app.Div().
 				Style("font-size", "0.9em").
+				Style("display", "flex").
+				Style("flex-direction", "row").
+				Style("flex-wrap", "wrap").
+				Style("gap", "1em").
 				Body(
-					blazar.Button().
-						Icon("arrow-left").
-						Label("Inbound").
-						Outline(!c.filterInbound).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterInbound = !c.filterInbound
-							c.filterOutbound = false
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					blazar.Button().
-						Icon("arrow-right").
-						Label("Outbound").
-						Outline(!c.filterOutbound).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterInbound = false
-							c.filterOutbound = !c.filterOutbound
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					app.Span().
-						Text(" ").
-						Style("width", "1em").
-						Style("display", "inline-block"),
-					blazar.Button().
-						Icon(sequenceItemToIcon(SequenceAutoAttendant)).
-						Label("Auto Attendant").
-						Outline(!c.filterResultAutoAttendant).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterResultAutoAttendant = !c.filterResultAutoAttendant
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					blazar.Button().
-						Icon(sequenceItemToIcon(SequenceRingGroup)).
-						Label("Ring Group").
-						Outline(!c.filterResultRingGroup).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterResultRingGroup = !c.filterResultRingGroup
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					blazar.Button().
-						Icon(sequenceItemToIcon(SequencePhone)).
-						Label("Phone").
-						Outline(!c.filterResultPhone).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterResultPhone = !c.filterResultPhone
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					blazar.Button().
-						Icon(sequenceItemToIcon(SequenceMessage)).
-						Label("Message").
-						Outline(!c.filterResultMessage).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterResultMessage = !c.filterResultMessage
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					blazar.Button().
-						Icon(sequenceItemToIcon(SequenceVoicemail)).
-						Label("Voicemail").
-						Outline(!c.filterResultVoicemail).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterResultVoicemail = !c.filterResultVoicemail
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					blazar.Button().
-						Icon(sequenceItemToIcon(SequenceIncomplete)).
-						Label("Incomplete").
-						Outline(!c.filterResultIncomplete).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterResultIncomplete = !c.filterResultIncomplete
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					blazar.Button().
-						Icon(sequenceItemToIcon(SequenceConnected)).
-						Label("Connected").
-						Outline(!c.filterResultConnected).
-						OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-							c.filterResultConnected = !c.filterResultConnected
-							c.filteredCallRows = c.filterCallRows(c.callRows)
-							ctx.Update()
-						}),
-					app.IfSlice(c.filterPhoneNumber != "", func() []app.UI {
-						return []app.UI{
-							app.Span().
-								Text(" ").
-								Style("width", "1em").
-								Style("display", "inline-block"),
+					app.Div().
+						Body(
 							blazar.Button().
-								Icon(sequenceItemToIcon(SequencePhone)).
-								Label(formatPhoneNumber(c.filterPhoneNumber)).
-								Outline(false).
+								Icon("arrow-left").
+								Label("Inbound").
+								Outline(!c.filterInbound).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterPhoneNumber = ""
+									c.filterInbound = !c.filterInbound
+									c.filterOutbound = false
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
-						}
+							blazar.Button().
+								Icon("arrow-right").
+								Label("Outbound").
+								Outline(!c.filterOutbound).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterInbound = false
+									c.filterOutbound = !c.filterOutbound
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+						),
+					app.Div().
+						Body(
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequenceAutoAttendant)).
+								Label("Auto Attendant").
+								Outline(!c.filterResultAutoAttendant).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterResultAutoAttendant = !c.filterResultAutoAttendant
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequenceRingGroup)).
+								Label("Ring Group").
+								Outline(!c.filterResultRingGroup).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterResultRingGroup = !c.filterResultRingGroup
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequencePhone)).
+								Label("Phone").
+								Outline(!c.filterResultPhone).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterResultPhone = !c.filterResultPhone
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequenceMessage)).
+								Label("Message").
+								Outline(!c.filterResultMessage).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterResultMessage = !c.filterResultMessage
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequenceVoicemail)).
+								Label("Voicemail").
+								Outline(!c.filterResultVoicemail).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterResultVoicemail = !c.filterResultVoicemail
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequenceIncomplete)).
+								Label("Incomplete").
+								Outline(!c.filterResultIncomplete).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterResultIncomplete = !c.filterResultIncomplete
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequenceConnected)).
+								Label("Connected").
+								Outline(!c.filterResultConnected).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterResultConnected = !c.filterResultConnected
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+						),
+					app.If(c.filterPhoneNumber != "", func() app.UI {
+						return app.Div().
+							Body(
+								blazar.Button().
+									Icon(sequenceItemToIcon(SequencePhone)).
+									Label(formatPhoneNumber(c.filterPhoneNumber)).
+									Outline(false).
+									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+										c.filterPhoneNumber = ""
+										c.filteredCallRows = c.filterCallRows(c.callRows)
+										ctx.Update()
+									}),
+							)
 					}),
 				),
 		)
@@ -488,6 +491,7 @@ func (c *CallsPage) renderCallSide(side string, phoneNumber string, name string)
 	}
 	body = append(body,
 		blazar.Copy().
+			Style("text-wrap", "nowrap").
 			Value(formatPhoneNumber(phoneNumber)).
 			Text(formatPhoneNumber(phoneNumber)),
 	)
@@ -527,6 +531,7 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 				Name: "Icons",
 				Value: func(row CallRow) any {
 					return app.Div().
+						Style("text-wrap", "nowrap").
 						Body(
 							app.Range(row.Sequence).Slice(func(i int) app.UI {
 								item := row.Sequence[i]
