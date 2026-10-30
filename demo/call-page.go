@@ -456,6 +456,23 @@ func (c *CallsPage) renderCallFilter() app.UI {
 							c.filteredCallRows = c.filterCallRows(c.callRows)
 							ctx.Update()
 						}),
+					app.IfSlice(c.filterPhoneNumber != "", func() []app.UI {
+						return []app.UI{
+							app.Span().
+								Text(" ").
+								Style("width", "1em").
+								Style("display", "inline-block"),
+							blazar.Button().
+								Icon(sequenceItemToIcon(SequencePhone)).
+								Label(formatPhoneNumber(c.filterPhoneNumber)).
+								Outline(false).
+								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+									c.filterPhoneNumber = ""
+									c.filteredCallRows = c.filterCallRows(c.callRows)
+									ctx.Update()
+								}),
+						}
+					}),
 				),
 		)
 }
