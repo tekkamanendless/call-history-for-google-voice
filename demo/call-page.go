@@ -79,6 +79,17 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}
 	}
 
+	c.filter = Filter{
+		InternalVersion: 1,
+	}
+	{
+		var savedFilter Filter
+		ctx.GetState("filter", &savedFilter)
+		if savedFilter.InternalVersion != 0 {
+			c.filter = savedFilter
+		}
+	}
+
 	c.timezone = time.Local
 
 	{
@@ -426,6 +437,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.Inbound = !c.filter.Inbound
 									c.filter.Outbound = false
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -436,6 +449,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.Inbound = false
 									c.filter.Outbound = !c.filter.Outbound
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -448,6 +463,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								Outline(!c.filter.ResultAutoAttendant).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.ResultAutoAttendant = !c.filter.ResultAutoAttendant
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -457,6 +474,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								Outline(!c.filter.ResultRingGroup).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.ResultRingGroup = !c.filter.ResultRingGroup
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -466,6 +485,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								Outline(!c.filter.ResultPhone).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.ResultPhone = !c.filter.ResultPhone
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -475,6 +496,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								Outline(!c.filter.ResultMessage).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.ResultMessage = !c.filter.ResultMessage
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -484,6 +507,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								Outline(!c.filter.ResultVoicemail).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.ResultVoicemail = !c.filter.ResultVoicemail
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -493,6 +518,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								Outline(!c.filter.ResultIncomplete).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.ResultIncomplete = !c.filter.ResultIncomplete
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -502,6 +529,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 								Outline(!c.filter.ResultConnected).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									c.filter.ResultConnected = !c.filter.ResultConnected
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -515,6 +544,8 @@ func (c *CallsPage) renderCallFilter() app.UI {
 									Outline(false).
 									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 										c.filter.PhoneNumber = ""
+										ctx.SetState("filter", c.filter).Persist()
+
 										c.filteredCallRows = c.filterCallRows(c.callRows)
 										ctx.Update()
 									}),
@@ -620,6 +651,8 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 									} else {
 										c.filter.PhoneNumber = phoneNumber
 									}
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -655,6 +688,8 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 									} else {
 										c.filter.PhoneNumber = phoneNumber
 									}
+									ctx.SetState("filter", c.filter).Persist()
+
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
