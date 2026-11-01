@@ -31,30 +31,35 @@ type CallsPage struct {
 	adminClient *admin.Service
 
 	configuration Configuration
+	filter        Filter
 
-	searching                 bool
-	searched                  bool
-	rawActivities             []*admin.Activity // Debug
-	calls                     []*Call           // Debug
-	callRows                  []CallRow
-	filteredCallRows          []CallRow
-	filterInbound             bool
-	filterOutbound            bool
-	filterResultConnected     bool
-	filterResultIncomplete    bool
-	filterResultAutoAttendant bool
-	filterResultRingGroup     bool
-	filterResultPhone         bool
-	filterResultMessage       bool
-	filterResultVoicemail     bool
-	filterPhoneNumber         string
+	searching        bool
+	searched         bool
+	rawActivities    []*admin.Activity // Debug
+	calls            []*Call           // Debug
+	callRows         []CallRow
+	filteredCallRows []CallRow
 }
 
 type Configuration struct {
-	InternalVersion int    `json:"internalVersion"` // Used to track changes to the configuration schema.
+	InternalVersion int    `json:"internalVersion"` // Used to track changes to the schema.
 	Timeframe       string `json:"timeframe"`
 	StartTimeString string `json:"startTimeString"`
 	EndTimeString   string `json:"endTimeString"`
+}
+
+type Filter struct {
+	InternalVersion     int    `json:"internalVersion"` // Used to track changes to the schema.
+	Inbound             bool   `json:"inbound"`
+	Outbound            bool   `json:"outbound"`
+	ResultConnected     bool   `json:"resultConnected"`
+	ResultIncomplete    bool   `json:"resultIncomplete"`
+	ResultAutoAttendant bool   `json:"resultAutoAttendant"`
+	ResultRingGroup     bool   `json:"resultRingGroup"`
+	ResultPhone         bool   `json:"resultPhone"`
+	ResultMessage       bool   `json:"resultMessage"`
+	ResultVoicemail     bool   `json:"resultVoicemail"`
+	PhoneNumber         string `json:"phoneNumber"`
 }
 
 func (c *CallsPage) OnMount(ctx app.Context) {
@@ -103,7 +108,6 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		slog.ErrorContext(ctx.Context, "CallPage: OnMount: errorCallback", "err", err)
 	}
 
-	// TODO: WRAP THIS IN A PROMISE SO THAT WE CAN AWAIT A LOGIN EVENT.
 	c.authClient = googleoauthjs.NewTokenClient(ctx.Context,
 		googleoauthjs.WithClientID("531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com"),
 		googleoauthjs.WithScopes([]string{
@@ -114,13 +118,6 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		googleoauthjs.WithCallback(loginCallback),
 		googleoauthjs.WithErrorCallback(errorCallback),
 	)
-
-	/*
-		app.Window().Set("test_function", app.FuncOf(func(this app.Value, args []app.Value) any {
-			slog.InfoContext(ctx.Context, "CallPage: OnMount: test_function", "args", len(args))
-			return nil
-		}))
-	*/
 
 	{
 		var token oauth2.Token
@@ -182,27 +179,6 @@ func (c *CallsPage) Render() app.UI {
 							}),
 					)
 			}),
-			/*
-				app.If(c.authClient != nil, func() app.UI {
-					return app.Div().
-						ID("g_id_onload").
-						DataSet("client_id", "531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com").
-						DataSet("context", "signin").
-						DataSet("ux_mode", "popup").
-						DataSet("auto_prompt", "false").
-						DataSet("callback", "test_function")
-				}),
-				app.If(c.authClient != nil, func() app.UI {
-					return app.Div().
-						Class("g_id_signin").
-						DataSet("type", "standard").
-						DataSet("shape", "rectangular").
-						DataSet("size", "large").
-						DataSet("theme", "outline").
-						DataSet("text", "signin_with").
-						DataSet("callback", "test_function")
-				}),
-			*/
 			app.IfSlice(c.userInfo != nil, func() []app.UI {
 				return []app.UI{
 					blazar.Collapse().
@@ -446,20 +422,20 @@ func (c *CallsPage) renderCallFilter() app.UI {
 							blazar.Button().
 								Icon("arrow-left").
 								Label("Inbound").
-								Outline(!c.filterInbound).
+								Outline(!c.filter.Inbound).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterInbound = !c.filterInbound
-									c.filterOutbound = false
+									c.filter.Inbound = !c.filter.Inbound
+									c.filter.Outbound = false
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 							blazar.Button().
 								Icon("arrow-right").
 								Label("Outbound").
-								Outline(!c.filterOutbound).
+								Outline(!c.filter.Outbound).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterInbound = false
-									c.filterOutbound = !c.filterOutbound
+									c.filter.Inbound = false
+									c.filter.Outbound = !c.filter.Outbound
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
@@ -469,76 +445,76 @@ func (c *CallsPage) renderCallFilter() app.UI {
 							blazar.Button().
 								Icon(sequenceItemToIcon(SequenceAutoAttendant)).
 								Label("Auto Attendant").
-								Outline(!c.filterResultAutoAttendant).
+								Outline(!c.filter.ResultAutoAttendant).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterResultAutoAttendant = !c.filterResultAutoAttendant
+									c.filter.ResultAutoAttendant = !c.filter.ResultAutoAttendant
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 							blazar.Button().
 								Icon(sequenceItemToIcon(SequenceRingGroup)).
 								Label("Ring Group").
-								Outline(!c.filterResultRingGroup).
+								Outline(!c.filter.ResultRingGroup).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterResultRingGroup = !c.filterResultRingGroup
+									c.filter.ResultRingGroup = !c.filter.ResultRingGroup
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 							blazar.Button().
 								Icon(sequenceItemToIcon(SequencePhone)).
 								Label("Phone").
-								Outline(!c.filterResultPhone).
+								Outline(!c.filter.ResultPhone).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterResultPhone = !c.filterResultPhone
+									c.filter.ResultPhone = !c.filter.ResultPhone
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 							blazar.Button().
 								Icon(sequenceItemToIcon(SequenceMessage)).
 								Label("Message").
-								Outline(!c.filterResultMessage).
+								Outline(!c.filter.ResultMessage).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterResultMessage = !c.filterResultMessage
+									c.filter.ResultMessage = !c.filter.ResultMessage
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 							blazar.Button().
 								Icon(sequenceItemToIcon(SequenceVoicemail)).
 								Label("Voicemail").
-								Outline(!c.filterResultVoicemail).
+								Outline(!c.filter.ResultVoicemail).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterResultVoicemail = !c.filterResultVoicemail
+									c.filter.ResultVoicemail = !c.filter.ResultVoicemail
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 							blazar.Button().
 								Icon(sequenceItemToIcon(SequenceIncomplete)).
 								Label("Incomplete").
-								Outline(!c.filterResultIncomplete).
+								Outline(!c.filter.ResultIncomplete).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterResultIncomplete = !c.filterResultIncomplete
+									c.filter.ResultIncomplete = !c.filter.ResultIncomplete
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 							blazar.Button().
 								Icon(sequenceItemToIcon(SequenceConnected)).
 								Label("Connected").
-								Outline(!c.filterResultConnected).
+								Outline(!c.filter.ResultConnected).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-									c.filterResultConnected = !c.filterResultConnected
+									c.filter.ResultConnected = !c.filter.ResultConnected
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
 								}),
 						),
-					app.If(c.filterPhoneNumber != "", func() app.UI {
+					app.If(c.filter.PhoneNumber != "", func() app.UI {
 						return app.Div().
 							Body(
 								blazar.Button().
 									Icon(sequenceItemToIcon(SequencePhone)).
-									Label(formatPhoneNumber(c.filterPhoneNumber)).
+									Label(formatPhoneNumber(c.filter.PhoneNumber)).
 									Outline(false).
 									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-										c.filterPhoneNumber = ""
+										c.filter.PhoneNumber = ""
 										c.filteredCallRows = c.filterCallRows(c.callRows)
 										ctx.Update()
 									}),
@@ -630,7 +606,7 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 								Icon("filter").
 								Style("cursor", "pointer").
 								Style("color", func() string {
-									if c.filterPhoneNumber == row.Source {
+									if c.filter.PhoneNumber == row.Source {
 										return "var(--blazar-theme-primary)"
 									}
 									return "lightgray"
@@ -639,10 +615,10 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									phoneNumber := e.Target.Call("closest", ".filter-icon").Get("dataset").Get("phoneNumber").String()
 
-									if c.filterPhoneNumber == phoneNumber {
-										c.filterPhoneNumber = ""
+									if c.filter.PhoneNumber == phoneNumber {
+										c.filter.PhoneNumber = ""
 									} else {
-										c.filterPhoneNumber = phoneNumber
+										c.filter.PhoneNumber = phoneNumber
 									}
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
@@ -665,7 +641,7 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 								Icon("filter").
 								Style("cursor", "pointer").
 								Style("color", func() string {
-									if c.filterPhoneNumber == row.Destination {
+									if c.filter.PhoneNumber == row.Destination {
 										return "var(--blazar-theme-primary)"
 									}
 									return "lightgray"
@@ -674,10 +650,10 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 									phoneNumber := e.Target.Call("closest", ".filter-icon").Get("dataset").Get("phoneNumber").String()
 
-									if c.filterPhoneNumber == phoneNumber {
-										c.filterPhoneNumber = ""
+									if c.filter.PhoneNumber == phoneNumber {
+										c.filter.PhoneNumber = ""
 									} else {
-										c.filterPhoneNumber = phoneNumber
+										c.filter.PhoneNumber = phoneNumber
 									}
 									c.filteredCallRows = c.filterCallRows(c.callRows)
 									ctx.Update()
@@ -1034,21 +1010,42 @@ func (c *CallsPage) search(ctx app.Context) {
 	var startTime *time.Time
 	var endTime *time.Time
 
-	if c.configuration.StartTimeString != "" {
-		t, err := time.Parse(time.DateOnly, c.configuration.StartTimeString)
-		if err != nil {
-			slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
-			return
-		}
+	switch c.configuration.Timeframe {
+	case "past-24-hours":
+		t := time.Now().Add(-24 * time.Hour)
 		startTime = &t
-	}
-	if c.configuration.EndTimeString != "" {
-		t, err := time.Parse(time.DateOnly, c.configuration.EndTimeString)
-		if err != nil {
-			slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
-			return
+	case "past-7-days":
+		t := time.Now().Add(-7 * 24 * time.Hour)
+		startTime = &t
+	case "past-30-days":
+		t := time.Now().Add(-30 * 24 * time.Hour)
+		startTime = &t
+	case "past-90-days":
+		t := time.Now().Add(-90 * 24 * time.Hour)
+		startTime = &t
+	case "past-180-days":
+		t := time.Now().Add(-180 * 24 * time.Hour)
+		startTime = &t
+	case "custom":
+		if c.configuration.StartTimeString != "" {
+			t, err := time.Parse(time.DateOnly, c.configuration.StartTimeString)
+			if err != nil {
+				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
+				return
+			}
+			startTime = &t
 		}
-		endTime = &t
+		if c.configuration.EndTimeString != "" {
+			t, err := time.Parse(time.DateOnly, c.configuration.EndTimeString)
+			if err != nil {
+				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
+				return
+			}
+			endTime = &t
+		}
+	default:
+		slog.ErrorContext(ctx.Context, "CallPage: search: unknown timeframe", "timeframe", c.configuration.Timeframe)
+		return
 	}
 
 	ctx.Dispatch(func(ctx app.Context) {
@@ -1258,34 +1255,34 @@ func (c *CallsPage) filterCallRows(callRows []CallRow) []CallRow {
 
 	var allowedFinalStates []string
 	{
-		if c.filterResultAutoAttendant {
+		if c.filter.ResultAutoAttendant {
 			allowedFinalStates = append(allowedFinalStates, SequenceAutoAttendant)
 		}
-		if c.filterResultRingGroup {
+		if c.filter.ResultRingGroup {
 			allowedFinalStates = append(allowedFinalStates, SequenceRingGroup)
 		}
-		if c.filterResultPhone {
+		if c.filter.ResultPhone {
 			allowedFinalStates = append(allowedFinalStates, SequencePhone)
 		}
-		if c.filterResultMessage {
+		if c.filter.ResultMessage {
 			allowedFinalStates = append(allowedFinalStates, SequenceMessage)
 		}
-		if c.filterResultVoicemail {
+		if c.filter.ResultVoicemail {
 			allowedFinalStates = append(allowedFinalStates, SequenceVoicemail)
 		}
-		if c.filterResultIncomplete {
+		if c.filter.ResultIncomplete {
 			allowedFinalStates = append(allowedFinalStates, SequenceIncomplete)
 		}
-		if c.filterResultConnected {
+		if c.filter.ResultConnected {
 			allowedFinalStates = append(allowedFinalStates, SequenceConnected)
 		}
 	}
 
 	for _, callRow := range callRows {
-		if c.filterInbound && callRow.Direction != DirectionIn {
+		if c.filter.Inbound && callRow.Direction != DirectionIn {
 			continue
 		}
-		if c.filterOutbound && callRow.Direction != DirectionOut {
+		if c.filter.Outbound && callRow.Direction != DirectionOut {
 			continue
 		}
 
@@ -1298,8 +1295,8 @@ func (c *CallsPage) filterCallRows(callRows []CallRow) []CallRow {
 			}
 		}
 
-		if c.filterPhoneNumber != "" {
-			if callRow.Source != c.filterPhoneNumber && callRow.Destination != c.filterPhoneNumber {
+		if c.filter.PhoneNumber != "" {
+			if callRow.Source != c.filter.PhoneNumber && callRow.Destination != c.filter.PhoneNumber {
 				continue
 			}
 		}
