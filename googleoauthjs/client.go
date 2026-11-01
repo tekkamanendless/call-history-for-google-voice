@@ -265,6 +265,8 @@ func WithOverridableLoginHint(loginHint string) OverridableTokenClientConfigOpti
 
 // RequestAccessToken requests an access token from the Google OAuth2 API.
 // Any additional overrides may be specified, but it will work without any.
+//
+// This will return after the callback has been called.
 func (c *TokenClient) RequestAccessToken(opts ...OverridableTokenClientConfigOption) error {
 	cfg := &OverridableTokenClientConfig{}
 	for _, opt := range opts {

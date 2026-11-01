@@ -23,15 +23,14 @@ import (
 type CallsPage struct {
 	app.Compo
 
-	startTimeString string
-	endTimeString   string
-
 	errorMessage string
 
 	timezone    *time.Location
 	authClient  *googleoauthjs.TokenClient
 	userInfo    *googleoauth2.Userinfo
 	adminClient *admin.Service
+
+	configuration Configuration
 
 	searching                 bool
 	searched                  bool
@@ -51,11 +50,30 @@ type CallsPage struct {
 	filterPhoneNumber         string
 }
 
+type Configuration struct {
+	InternalVersion int    `json:"internalVersion"` // Used to track changes to the configuration schema.
+	Timeframe       string `json:"timeframe"`
+	StartTimeString string `json:"startTimeString"`
+	EndTimeString   string `json:"endTimeString"`
+}
+
 func (c *CallsPage) OnMount(ctx app.Context) {
 	slog.InfoContext(ctx.Context, "CallPage: OnMount")
 
-	c.startTimeString = time.Now().Add(-1 * time.Hour * 24).Format(time.DateOnly)
-	//c.endTime = time.Now()
+	c.configuration = Configuration{
+		InternalVersion: 1,
+		Timeframe:       "past-7-days",
+		StartTimeString: time.Now().Add(-1 * time.Hour * 24).Format(time.DateOnly),
+		EndTimeString:   "",
+	}
+	{
+		var savedConfiguration Configuration
+		ctx.GetState("configuration", &savedConfiguration)
+		if savedConfiguration.InternalVersion != 0 {
+			c.configuration = savedConfiguration
+		}
+	}
+
 	c.timezone = time.Local
 
 	{
@@ -69,18 +87,6 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}
 	}
 	slog.InfoContext(ctx.Context, "CallPage: OnMount: timezone", "timezone", c.timezone)
-
-	{
-		var token oauth2.Token
-		ctx.GetState("user-token", &token)
-		if token.AccessToken != "" {
-			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token", "token", token)
-			err := c.loginWithToken(ctx, token)
-			if err != nil {
-				slog.ErrorContext(ctx.Context, "CallPage: OnMount: Could not log in with saved token.", "err", err)
-			}
-		}
-	}
 
 	loginCallback := func(token oauth2.Token) {
 		ctx.Async(func() {
@@ -116,6 +122,20 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}))
 	*/
 
+	{
+		var token oauth2.Token
+		ctx.GetState("user-token", &token)
+		if token.AccessToken != "" {
+			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token", "token", token)
+			err := c.loginWithToken(ctx, token)
+			if err != nil {
+				slog.ErrorContext(ctx.Context, "CallPage: OnMount: Could not log in with saved token.", "err", err)
+			} else {
+				c.search(ctx)
+			}
+		}
+	}
+
 	ctx.Update()
 }
 
@@ -133,7 +153,13 @@ func (c *CallsPage) Render() app.UI {
 							Label("Sign in with Google").
 							Icon("google fa-brands").
 							OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-								c.authClient.RequestAccessToken()
+								err := c.authClient.RequestAccessToken()
+								if err != nil {
+									slog.ErrorContext(ctx.Context, "CallPage: Render: could not request access token", "err", err)
+									return
+								}
+
+								c.search(ctx)
 							}),
 					)
 			}),
@@ -185,16 +211,58 @@ func (c *CallsPage) Render() app.UI {
 						Body(
 							blazar.Form().
 								Body(
-									blazar.Input[string]().
-										Label("Start Time").
-										Clearable(true).
-										Type("date").
-										Bind(&c.startTimeString),
-									blazar.Input[string]().
-										Label("End Time").
-										Clearable(true).
-										Type("date").
-										Bind(&c.endTimeString),
+									blazar.Select().
+										Label("Timeframe").
+										AllowedValue(
+											blazar.SelectOption{
+												Label: "Past 24 hours",
+												Value: "past-24-hours",
+											},
+											blazar.SelectOption{
+												Label: "Past 7 days",
+												Value: "past-7-days",
+											},
+											blazar.SelectOption{
+												Label: "Past 30 days",
+												Value: "past-30-days",
+											},
+											blazar.SelectOption{
+												Label: "Past 90 days",
+												Value: "past-90-days",
+											},
+											blazar.SelectOption{
+												Label: "Past 180 days",
+												Value: "past-180-days",
+											},
+											blazar.SelectOption{
+												Label: "Custom...",
+												Value: "custom",
+											},
+										).
+										Bind(&c.configuration.Timeframe).
+										On("change", func(ctx app.Context, e app.Event) {
+											ctx.SetState("configuration", c.configuration).Persist()
+										}),
+									app.IfSlice(c.configuration.Timeframe == "custom", func() []app.UI {
+										return []app.UI{
+											blazar.Input[string]().
+												Label("Start Time").
+												Clearable(true).
+												Type("date").
+												Bind(&c.configuration.StartTimeString).
+												On("change", func(ctx app.Context, e app.Event) {
+													ctx.SetState("configuration", c.configuration).Persist()
+												}),
+											blazar.Input[string]().
+												Label("End Time").
+												Clearable(true).
+												Type("date").
+												Bind(&c.configuration.EndTimeString).
+												On("change", func(ctx app.Context, e app.Event) {
+													ctx.SetState("configuration", c.configuration).Persist()
+												}),
+										}
+									}),
 								).
 								Action(blazar.FormAction{
 									Name:     "Search",
@@ -966,16 +1034,16 @@ func (c *CallsPage) search(ctx app.Context) {
 	var startTime *time.Time
 	var endTime *time.Time
 
-	if c.startTimeString != "" {
-		t, err := time.Parse(time.DateOnly, c.startTimeString)
+	if c.configuration.StartTimeString != "" {
+		t, err := time.Parse(time.DateOnly, c.configuration.StartTimeString)
 		if err != nil {
 			slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
 			return
 		}
 		startTime = &t
 	}
-	if c.endTimeString != "" {
-		t, err := time.Parse(time.DateOnly, c.endTimeString)
+	if c.configuration.EndTimeString != "" {
+		t, err := time.Parse(time.DateOnly, c.configuration.EndTimeString)
 		if err != nil {
 			slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
 			return
