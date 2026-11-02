@@ -591,9 +591,9 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 					icon := ""
 					switch row.Direction {
 					case DirectionIn:
-						icon = "arrow-left"
+						icon = tabler.IconOutlineArrowLeft
 					case DirectionOut:
-						icon = "arrow-right"
+						icon = tabler.IconOutlineArrowRight
 					}
 					if icon == "" {
 						return row.Direction
@@ -878,13 +878,13 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 							icon := ""
 							switch call.EventType {
 							case "EVENT_TYPE_PBX_RING_GROUP":
-								icon = "user-group"
+								icon = tabler.IconOutlineUsers
 							case "EVENT_TYPE_PBX_AUTO_ATTENDANT":
-								icon = "tty"
+								icon = tabler.IconOutlineSitemap
 							case "EVENT_TYPE_CALL":
-								icon = "phone"
+								icon = tabler.IconFilledPhone
 							case "EVENT_TYPE_MSG":
-								icon = "message"
+								icon = tabler.IconOutlineMessage
 							}
 
 							if icon == "" {
@@ -898,21 +898,21 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 							icon := ""
 							switch call.EventName {
 							case "AUTO_ATTENDANT_INCOMING_CALL_RECEIVED":
-								icon = "arrow-left"
+								icon = tabler.IconOutlineArrowLeft
 							case "INCOMING_CALL_RECEIVED":
-								icon = "arrow-left"
+								icon = tabler.IconOutlineArrowLeft
 							case "MSG_RECEIVED":
-								icon = "arrow-left"
+								icon = tabler.IconOutlineArrowLeft
 							case "MSG_SENT":
-								icon = "arrow-right"
+								icon = tabler.IconOutlineArrowRight
 							case "OUTGOING_CALL_MADE":
-								icon = "arrow-right"
+								icon = tabler.IconOutlineArrowRight
 							case "RING_GROUP_INCOMING_CALL_RECEIVED":
-								icon = "arrow-left"
+								icon = tabler.IconOutlineArrowLeft
 							case "RING_GROUP_OUTGOING_CALL_MADE":
-								icon = "arrow-right"
+								icon = tabler.IconOutlineArrowRight
 							case "RING_GROUP_VOICEMAIL_RECEIVED":
-								icon = "voicemail"
+								icon = tabler.IconOutlineRecordMail
 							}
 
 							if icon == "" {
