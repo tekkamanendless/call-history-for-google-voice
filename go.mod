@@ -3,9 +3,9 @@ module github.com/tekkamanendless/call-history-for-google-voice
 go 1.26.2
 
 require (
-	github.com/go-app-blazar/blazar v0.3.0
-	github.com/go-app-blazar/lucide-font v0.1.0
+	github.com/go-app-blazar/blazar v0.3.1
 	github.com/go-app-blazar/router v0.1.2
+	github.com/go-app-blazar/tabler-font v0.1.2
 	github.com/joho/godotenv v1.5.1
 	github.com/lmittmann/tint v1.1.3
 	github.com/mattn/go-isatty v0.0.22
