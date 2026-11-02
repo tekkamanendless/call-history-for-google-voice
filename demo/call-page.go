@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-app-blazar/blazar/blazar"
 	"github.com/go-app-blazar/blazar/htmlevent"
-	"github.com/go-app-blazar/lucide-font"
+	"github.com/go-app-blazar/tabler-font"
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
 	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
 	"golang.org/x/oauth2"
@@ -160,7 +160,7 @@ func (c *CallsPage) Render() app.UI {
 					Body(
 						blazar.Button().
 							Label("Sign in with Google").
-							Icon(lucide.IconLogIn).
+							Icon(tabler.IconFilledBrandGoogle).
 							OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 								err := c.authClient.RequestAccessToken()
 								if err != nil {
@@ -184,7 +184,7 @@ func (c *CallsPage) Render() app.UI {
 					Body(
 						blazar.Button().
 							Label("Log out as " + c.userInfo.Name).
-							Icon(lucide.IconLogOut).
+							Icon(tabler.IconOutlineLogout).
 							OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 								c.logout(ctx)
 								ctx.Update()
@@ -388,19 +388,19 @@ const (
 func sequenceItemToIcon(item string) string {
 	switch item {
 	case SequenceAutoAttendant:
-		return lucide.IconGraphHub
+		return tabler.IconFilledSitemap
 	case SequenceRingGroup:
-		return lucide.IconUsers
+		return tabler.IconOutlineUsers
 	case SequencePhone:
-		return lucide.IconPhone
+		return tabler.IconFilledPhone
 	case SequenceMessage:
-		return lucide.IconMessageCircle
+		return tabler.IconOutlineMessage
 	case SequenceVoicemail:
-		return lucide.IconVoicemail
+		return tabler.IconOutlineRecordMail
 	case SequenceIncomplete:
-		return lucide.IconPhoneOff
+		return tabler.IconOutlinePhoneOff
 	case SequenceConnected:
-		return lucide.IconPhoneCall
+		return tabler.IconFilledPhoneCall
 	}
 	return item
 }
@@ -432,7 +432,7 @@ func (c *CallsPage) renderCallFilter() app.UI {
 					app.Div().
 						Body(
 							blazar.Button().
-								Icon(lucide.IconArrowLeft).
+								Icon(tabler.IconOutlineArrowLeft).
 								Label("Inbound").
 								Outline(!c.filter.Inbound).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
@@ -444,7 +444,7 @@ func (c *CallsPage) renderCallFilter() app.UI {
 									ctx.Update()
 								}),
 							blazar.Button().
-								Icon(lucide.IconArrowRight).
+								Icon(tabler.IconOutlineArrowRight).
 								Label("Outbound").
 								Outline(!c.filter.Outbound).
 								OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
@@ -635,7 +635,13 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 							c.renderCallSide("source", row.Source, row.SourceName),
 							blazar.Icon().
 								Class("filter-icon").
-								Icon(lucide.IconFunnel).
+								Icon(func() string {
+									if c.filter.PhoneNumber == row.Source {
+										return tabler.IconFilledFilter
+									} else {
+										return tabler.IconOutlineFilter
+									}
+								}()).
 								Style("cursor", "pointer").
 								Style("color", func() string {
 									if c.filter.PhoneNumber == row.Source {
@@ -672,7 +678,13 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 							c.renderCallSide("destination", row.Destination, row.DestinationName),
 							blazar.Icon().
 								Class("filter-icon").
-								Icon(lucide.IconFunnel).
+								Icon(func() string {
+									if c.filter.PhoneNumber == row.Destination {
+										return tabler.IconFilledFilter
+									} else {
+										return tabler.IconOutlineFilter
+									}
+								}()).
 								Style("cursor", "pointer").
 								Style("color", func() string {
 									if c.filter.PhoneNumber == row.Destination {
