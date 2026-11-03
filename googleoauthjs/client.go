@@ -2,8 +2,12 @@ package googleoauthjs
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -299,4 +303,46 @@ func (c *TokenClient) RequestAccessToken(opts ...OverridableTokenClientConfigOpt
 	}
 
 	return nil
+}
+
+// TokenInfo is the information about the token.
+type TokenInfo struct {
+	AccessType    string        `json:"access_type"`
+	Audience      string        `json:"audience"`
+	Email         string        `json:"email"`
+	ExpiresIn     time.Duration `json:"expires_in"` // Measured in seconds.
+	IssuedTo      string        `json:"issued_to"`
+	Scope         string        `json:"scope"`
+	UserID        string        `json:"user_id"`
+	VerifiedEmail bool          `json:"verified_email"`
+}
+
+// TokenInfo returns the token info for the current token.
+func (c *TokenClient) TokenInfo(ctx context.Context, accessToken string) (*TokenInfo, error) {
+	httpClient := http.Client{
+		Timeout: 10 * time.Second,
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token="+url.QueryEscape(accessToken), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get token info: %w", err)
+	}
+	defer response.Body.Close()
+
+	contents, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read token info: %w", err)
+	}
+
+	var tokenInfo TokenInfo
+	err = json.Unmarshal(contents, &tokenInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal token info: %w", err)
+	}
+	tokenInfo.ExpiresIn = time.Duration(tokenInfo.ExpiresIn) * time.Second
+
+	return &tokenInfo, nil
 }

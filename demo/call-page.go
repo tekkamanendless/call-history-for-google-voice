@@ -254,6 +254,7 @@ func (c *CallsPage) Render() app.UI {
 								).
 								Action(blazar.FormAction{
 									Name:     "Search",
+									Icon:     tabler.IconOutlineSearch,
 									Function: c.search,
 								}),
 						),
@@ -1004,6 +1005,7 @@ func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) error {
 	return nil
 }
 
+// tokenIsExpired returns true if the token is expired.
 func (c *CallsPage) tokenIsExpired(ctx app.Context) bool {
 	var token oauth2.Token
 	ctx.GetState("user-token", &token)
@@ -1012,6 +1014,17 @@ func (c *CallsPage) tokenIsExpired(ctx app.Context) bool {
 			return true
 		}
 	}
+
+	tokenInfo, err := c.authClient.TokenInfo(ctx.Context, token.AccessToken)
+	if err != nil {
+		slog.ErrorContext(ctx.Context, "CallPage: tokenIsExpired: error", "err", err)
+		return true
+	}
+
+	if tokenInfo.ExpiresIn < 300*time.Second {
+		return true
+	}
+
 	return false
 }
 
@@ -1128,9 +1141,7 @@ func (c *CallsPage) search(ctx app.Context) {
 				var retrieveErr *googleapi.Error
 				if errors.As(err, &retrieveErr) {
 					slog.ErrorContext(ctx.Context, "CallPage: search: oauth2 error", "ErrorCode", retrieveErr.Code)
-					if retrieveErr.Code == 401 {
-						c.logout(ctx)
-					}
+					// TODO: Show this error in some way.
 				}
 
 				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
