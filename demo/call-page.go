@@ -1160,7 +1160,6 @@ func (c *CallsPage) search(ctx app.Context) {
 				var retrieveErr *googleapi.Error
 				if errors.As(err, &retrieveErr) {
 					slog.ErrorContext(ctx.Context, "CallPage: search: oauth2 error", "ErrorCode", retrieveErr.Code)
-					// TODO: Show this error in some way.
 				}
 
 				slog.ErrorContext(ctx.Context, "CallPage: search: error", "err", err)
@@ -1168,6 +1167,7 @@ func (c *CallsPage) search(ctx app.Context) {
 					c.searching = false
 					ctx.Update()
 				})
+				blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Error searching: "+err.Error()))
 				return
 			}
 			slog.InfoContext(ctx.Context, "CallPage: search: activities", "activities", len(activities.Items))
