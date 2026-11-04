@@ -876,7 +876,16 @@ func (c *CallsPage) buildCallRows(calls []*Call) []CallRow {
 			} else if incomplete {
 				row.Sequence = append(row.Sequence, SequenceIncomplete)
 			} else if call.CallDuration > 0 {
-				if len(call.Calls) > 0 {
+				switch call.EventType {
+				case "EVENT_TYPE_PBX_RING_GROUP":
+					if len(call.Calls) > 0 {
+						row.Sequence = append(row.Sequence, SequenceConnected)
+					}
+				case "EVENT_TYPE_PBX_AUTO_ATTENDANT":
+					if len(call.Calls) > 0 {
+						row.Sequence = append(row.Sequence, SequenceConnected)
+					}
+				case "EVENT_TYPE_CALL":
 					row.Sequence = append(row.Sequence, SequenceConnected)
 				}
 			}
@@ -1132,7 +1141,14 @@ func (c *CallsPage) logout(ctx app.Context) {
 	slog.InfoContext(ctx.Context, "CallPage: logout")
 	c.userInfo = nil
 	ctx.SetState("user-info", nil).Persist()
+
+	c.userToken = nil
 	ctx.SetState("user-token", nil).Persist()
+
+	c.rawActivities = nil
+	c.calls = nil
+	c.callRows = nil
+	c.filteredCallRows = nil
 
 	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Text("You have been logged out."))
 }
