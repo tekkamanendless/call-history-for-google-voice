@@ -35,6 +35,9 @@ type CallsPage struct {
 	configuration Configuration
 	filter        Filter
 
+	ready     bool
+	loggingIn bool
+
 	searching        bool
 	searched         bool
 	rawActivities    []*admin.Activity // Debug
@@ -66,6 +69,9 @@ type Filter struct {
 
 func (c *CallsPage) OnMount(ctx app.Context) {
 	slog.InfoContext(ctx.Context, "CallPage: OnMount")
+
+	c.ready = false
+	c.loggingIn = false
 
 	c.configuration = Configuration{
 		InternalVersion: 1,
@@ -106,52 +112,63 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 	}
 	slog.InfoContext(ctx.Context, "CallPage: OnMount: timezone", "timezone", c.timezone)
 
-	loginCallback := func(token oauth2.Token) {
-		ctx.Async(func() {
-			slog.InfoContext(ctx.Context, "CallPage: OnMount: loginCallback", "token", token)
-
-			c.userToken = &token
-			c.loginWithToken(ctx, token)
-
-			ctx.SetState("user-info", c.userInfo).Persist()
-			ctx.SetState("user-token", c.userToken).Persist()
-
-			blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Text("You are logged in as "+c.userInfo.Email))
-
-			ctx.Update()
-		})
-	}
-
-	errorCallback := func(err error) {
-		slog.ErrorContext(ctx.Context, "CallPage: OnMount: errorCallback", "err", err)
-	}
-
-	c.authClient = googleoauthjs.NewTokenClient(ctx.Context,
-		googleoauthjs.WithClientID("531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com"),
-		googleoauthjs.WithScopes([]string{
-			"email",
-			"profile",
-			"https://www.googleapis.com/auth/admin.reports.audit.readonly",
-		}),
-		googleoauthjs.WithCallback(loginCallback),
-		googleoauthjs.WithErrorCallback(errorCallback),
-	)
-
 	{
+		loginCallback := func(token oauth2.Token) {
+			slog.InfoContext(ctx.Context, "CallPage: OnMount: loginCallback", "token", token)
+			c.userToken = &token
+			ctx.SetState("user-token", *c.userToken).Persist()
+
+			// NOTE: We're not going to do anything with the token; the rest of the login workflow is handled when needed.
+		}
+
+		errorCallback := func(err error) {
+			slog.ErrorContext(ctx.Context, "CallPage: OnMount: errorCallback.", "err", err)
+		}
+
+		c.authClient = googleoauthjs.NewTokenClient(ctx.Context,
+			googleoauthjs.WithClientID("531363734726-vvb6f23uehpuk2joljh46uj5igk745qv.apps.googleusercontent.com"),
+			googleoauthjs.WithScopes([]string{
+				"email",
+				"profile",
+				"https://www.googleapis.com/auth/admin.reports.audit.readonly",
+			}),
+			googleoauthjs.WithCallback(loginCallback),
+			googleoauthjs.WithErrorCallback(errorCallback),
+		)
+	}
+
+	ctx.Async(func() {
 		ctx.GetState("user-token", &c.userToken)
 		if c.userToken != nil && c.userToken.AccessToken != "" {
-			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token", "token", c.userToken)
-			err := c.loginWithToken(ctx, *c.userToken)
-			if err != nil {
-				slog.ErrorContext(ctx.Context, "CallPage: OnMount: Could not log in with saved token.", "err", err)
+			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token found.", "token", c.userToken)
+
+			if c.tokenIsExpired(ctx) {
+				slog.InfoContext(ctx.Context, "CallPage: OnMount: Token is expired, refreshing token.")
+
+				err := c.refreshToken(ctx)
+				if err != nil {
+					slog.ErrorContext(ctx.Context, "CallPage: OnMount: Could not refresh token.", "err", err)
+				} else {
+					slog.InfoContext(ctx.Context, "CallPage: OnMount: Running initial search.")
+					c.search(ctx)
+				}
 			} else {
-				slog.InfoContext(ctx.Context, "CallPage: OnMount: Running initial search")
-				c.search(ctx)
+				slog.InfoContext(ctx.Context, "CallPage: OnMount: Token is not expired, logging in with saved token.")
+
+				err := c.setTokenAsPartOfLoginWorkflow(ctx, *c.userToken)
+				if err != nil {
+					slog.ErrorContext(ctx.Context, "CallPage: OnMount: Could not log in with saved token.", "err", err)
+				} else {
+					slog.InfoContext(ctx.Context, "CallPage: OnMount: Running initial search.")
+					c.search(ctx)
+				}
 			}
 		}
-	}
 
-	ctx.Update()
+		c.ready = true
+		slog.InfoContext(ctx.Context, "CallPage: OnMount: Ready.")
+		ctx.Update()
+	})
 }
 
 func (c *CallsPage) OnNav(ctx app.Context) {
@@ -163,220 +180,231 @@ func (c *CallsPage) Render() app.UI {
 		Body(
 			blazar.Snackbar().
 				Observe("snackbar-message"),
-			app.If(c.userInfo == nil, func() app.UI {
-				return app.Div().
-					Body(
-						blazar.Button().
-							Label("Sign in with Google").
-							Icon(tabler.IconFilledBrandGoogle).
-							OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-								err := c.authClient.RequestAccessToken()
-								if err != nil {
-									slog.ErrorContext(ctx.Context, "CallPage: Render: could not request access token", "err", err)
-									blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Could not sign in with Google: "+err.Error()))
-									return
-								}
-
-								ctx.Defer(func(ctx app.Context) {
-									slog.InfoContext(ctx.Context, "CallPage: Running search after Google login")
-									c.search(ctx)
-								})
-							}),
-					)
-			}),
-			app.If(c.userInfo != nil, func() app.UI {
-				/*
-					return app.Div().
-						Body(
-							app.Img().Src(c.userInfo.Picture).Width(32).Height(32),
-							app.Span().Text(c.userInfo.Name),
-						)
-				*/
-				return app.Div().
-					Body(
-						blazar.Button().
-							Label("Log out as " + c.userInfo.Name).
-							Icon(tabler.IconOutlineLogout).
-							OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-								c.logout(ctx)
-								ctx.Update()
-							}),
-					)
-			}),
-			app.IfSlice(c.userInfo != nil, func() []app.UI {
+			app.IfSlice(!c.ready, func() []app.UI {
 				return []app.UI{
-					blazar.Collapse().
-						Label("Configuration").
-						Open(true).
-						Body(
-							blazar.Form().
-								Body(
-									blazar.Select().
-										Label("Timeframe").
-										AllowedValue(
-											blazar.SelectOption{
-												Label: "Past 24 hours",
-												Value: "past-24-hours",
-											},
-											blazar.SelectOption{
-												Label: "Past 7 days",
-												Value: "past-7-days",
-											},
-											blazar.SelectOption{
-												Label: "Past 30 days",
-												Value: "past-30-days",
-											},
-											blazar.SelectOption{
-												Label: "Past 90 days",
-												Value: "past-90-days",
-											},
-											blazar.SelectOption{
-												Label: "Past 180 days",
-												Value: "past-180-days",
-											},
-											blazar.SelectOption{
-												Label: "Custom...",
-												Value: "custom",
-											},
-										).
-										Bind(&c.configuration.Timeframe).
-										On("change", func(ctx app.Context, e app.Event) {
-											ctx.SetState("configuration", c.configuration).Persist()
-										}),
-									app.IfSlice(c.configuration.Timeframe == "custom", func() []app.UI {
-										return []app.UI{
-											blazar.Input[string]().
-												Label("Start Time").
-												Clearable(true).
-												Type("date").
-												Bind(&c.configuration.StartTimeString).
-												On("change", func(ctx app.Context, e app.Event) {
-													ctx.SetState("configuration", c.configuration).Persist()
-												}),
-											blazar.Input[string]().
-												Label("End Time").
-												Clearable(true).
-												Type("date").
-												Bind(&c.configuration.EndTimeString).
-												On("change", func(ctx app.Context, e app.Event) {
-													ctx.SetState("configuration", c.configuration).Persist()
-												}),
-										}
-									}),
-								).
-								Action(blazar.FormAction{
-									Name:     "Search",
-									Icon:     tabler.IconOutlineSearch,
-									Function: c.search,
-								}),
-						),
-					blazar.ProgressBar().
-						Style("visibility", func() string {
-							if c.searching {
-								return "visible"
-							}
-							return "hidden"
-						}()).
-						Indeterminate(true),
-					app.If(c.errorMessage != "", func() app.UI {
-						return blazar.StatusBar().
-							Bad().
-							Text(c.errorMessage)
-					}),
-					app.If(c.searched, func() app.UI {
+					app.Div().Text("Loading..."),
+				}
+			}).ElseSlice(func() []app.UI {
+				return []app.UI{
+					app.If(c.ready && c.userInfo == nil, func() app.UI {
 						return app.Div().
-							Style("font-size", "0.8em").
-							Style("gap", "1em").
-							Style("display", "flex").
-							Style("flex-direction", "column").
 							Body(
-								app.H2().Text("Call Table"),
-								c.renderCallFilter(),
-								c.renderCallTable(c.filteredCallRows),
+								blazar.Button().
+									Label("Sign in with Google").
+									Icon(tabler.IconFilledBrandGoogle).
+									Disabled(c.loggingIn).
+									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+										ctx.Async(func() {
+											err := c.login(ctx)
+											if err != nil {
+												slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
+												blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Could not sign in with Google: "+err.Error()))
+												return
+											}
+
+											ctx.Defer(func(ctx app.Context) {
+												slog.InfoContext(ctx.Context, "CallPage: Running search after Google login.")
+												c.search(ctx)
+											})
+										})
+									}),
 							)
 					}),
-					app.If(c.searched, func() app.UI {
-						return blazar.Collapse().
-							Label("Debug").
-							Open(false).
+					app.If(c.ready && c.userInfo != nil, func() app.UI {
+						/*
+							return app.Div().
+								Body(
+									app.Img().Src(c.userInfo.Picture).Width(32).Height(32),
+									app.Span().Text(c.userInfo.Name),
+								)
+						*/
+						return app.Div().
 							Body(
-								app.Div().
-									Style("font-size", "0.8em").
-									Body(
-										app.H2().Text("Calls"),
-										c.renderCalls(c.calls),
-									),
-								app.Div().
-									Style("font-size", "0.8em").
-									Body(
-										app.H2().Text("Raw Activities"),
-										app.Range(c.rawActivities).Slice(func(i int) app.UI {
-											rawActivity := c.rawActivities[i]
-
-											return app.Div().
-												Body(
-													app.Span().Text(rawActivity.Id.Time),
-													app.Text(" "),
-													app.Span().Text(rawActivity.Actor.Email),
-													app.Text(" "),
-													app.Span().Text(fmt.Sprintf("Events: (%d)", len(rawActivity.Events))),
-													app.Range(rawActivity.Events).Slice(func(i int) app.UI {
-														rawEvent := rawActivity.Events[i]
-														parameters := map[string]*admin.ActivityEventsParameters{}
-														for _, parameter := range rawEvent.Parameters {
-															parameters[parameter.Name] = parameter
-														}
-
-														if rawEvent.Type == "EVENT_TYPE_PBX_AUTO_ATTENDANT" && rawEvent.Name == "AUTO_ATTENDANT_PUBLISHED" {
-															return nil
-														}
-
-														return app.Div().
-															Style("padding-left", "1em").
-															Body(
-																app.Span().Text(parameters["PARAM_SOURCE"].Value+" -> "+parameters["PARAM_DESTINATION"].Value),
-																app.Br(),
-																app.Span().Text(rawEvent.Type),
-																app.Text(" | "),
-																app.Span().Text(rawEvent.Name),
-																app.Text(" ("+rawEvent.Status.EventStatus+")"),
-																app.Br(),
-																app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
-																	return app.Span().Text("Ring Group: " + parameters["PARAM_RING_GROUP_NAME"].Value)
-																}),
-																app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
-																	return app.Br()
-																}),
-																app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
-																	return app.Span().Text("Distribution ID: " + parameters["PARAM_DISTRIBUTION_ID"].Value)
-																}),
-																app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
-																	return app.Br()
-																}),
-																app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
-																	return app.Span().Text("Auto Attendant: " + parameters["PARAM_AUTO_ATTENDANT_NAME"].Value)
-																}),
-																app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
-																	return app.Br()
-																}),
-																app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
-																	return app.Span().Text("Duration: " + time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue)*time.Millisecond).String())
-																}),
-																app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
-																	return app.Span().Text(" ")
-																}),
-																app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
-																	return app.Span().Text("Ring Duration: " + time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue)*time.Millisecond).String())
-																}),
-																app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
-																	return app.Span().Text(" ")
-																}),
-															)
-													}),
-												)
-										}),
-									),
+								blazar.Button().
+									Label("Log out as " + c.userInfo.Name).
+									Icon(tabler.IconOutlineLogout).
+									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+										c.logout(ctx)
+										ctx.Update()
+									}),
 							)
+					}),
+					app.IfSlice(c.ready && c.userInfo != nil, func() []app.UI {
+						return []app.UI{
+							blazar.Collapse().
+								Label("Configuration").
+								Open(true).
+								Body(
+									blazar.Form().
+										Body(
+											blazar.Select().
+												Label("Timeframe").
+												AllowedValue(
+													blazar.SelectOption{
+														Label: "Past 24 hours",
+														Value: "past-24-hours",
+													},
+													blazar.SelectOption{
+														Label: "Past 7 days",
+														Value: "past-7-days",
+													},
+													blazar.SelectOption{
+														Label: "Past 30 days",
+														Value: "past-30-days",
+													},
+													blazar.SelectOption{
+														Label: "Past 90 days",
+														Value: "past-90-days",
+													},
+													blazar.SelectOption{
+														Label: "Past 180 days",
+														Value: "past-180-days",
+													},
+													blazar.SelectOption{
+														Label: "Custom...",
+														Value: "custom",
+													},
+												).
+												Bind(&c.configuration.Timeframe).
+												On("change", func(ctx app.Context, e app.Event) {
+													ctx.SetState("configuration", c.configuration).Persist()
+												}),
+											app.IfSlice(c.configuration.Timeframe == "custom", func() []app.UI {
+												return []app.UI{
+													blazar.Input[string]().
+														Label("Start Time").
+														Clearable(true).
+														Type("date").
+														Bind(&c.configuration.StartTimeString).
+														On("change", func(ctx app.Context, e app.Event) {
+															ctx.SetState("configuration", c.configuration).Persist()
+														}),
+													blazar.Input[string]().
+														Label("End Time").
+														Clearable(true).
+														Type("date").
+														Bind(&c.configuration.EndTimeString).
+														On("change", func(ctx app.Context, e app.Event) {
+															ctx.SetState("configuration", c.configuration).Persist()
+														}),
+												}
+											}),
+										).
+										Action(blazar.FormAction{
+											Name:     "Search",
+											Icon:     tabler.IconOutlineSearch,
+											Function: c.search,
+										}),
+								),
+							blazar.ProgressBar().
+								Style("visibility", func() string {
+									if c.searching {
+										return "visible"
+									}
+									return "hidden"
+								}()).
+								Indeterminate(true),
+							app.If(c.errorMessage != "", func() app.UI {
+								return blazar.StatusBar().
+									Bad().
+									Text(c.errorMessage)
+							}),
+							app.If(c.searched, func() app.UI {
+								return app.Div().
+									Style("font-size", "0.8em").
+									Style("gap", "1em").
+									Style("display", "flex").
+									Style("flex-direction", "column").
+									Body(
+										app.H2().Text("Call Table"),
+										c.renderCallFilter(),
+										c.renderCallTable(c.filteredCallRows),
+									)
+							}),
+							app.If(c.searched, func() app.UI {
+								return blazar.Collapse().
+									Label("Debug").
+									Open(false).
+									Body(
+										app.Div().
+											Style("font-size", "0.8em").
+											Body(
+												app.H2().Text("Calls"),
+												c.renderCalls(c.calls),
+											),
+										app.Div().
+											Style("font-size", "0.8em").
+											Body(
+												app.H2().Text("Raw Activities"),
+												app.Range(c.rawActivities).Slice(func(i int) app.UI {
+													rawActivity := c.rawActivities[i]
+
+													return app.Div().
+														Body(
+															app.Span().Text(rawActivity.Id.Time),
+															app.Text(" "),
+															app.Span().Text(rawActivity.Actor.Email),
+															app.Text(" "),
+															app.Span().Text(fmt.Sprintf("Events: (%d)", len(rawActivity.Events))),
+															app.Range(rawActivity.Events).Slice(func(i int) app.UI {
+																rawEvent := rawActivity.Events[i]
+																parameters := map[string]*admin.ActivityEventsParameters{}
+																for _, parameter := range rawEvent.Parameters {
+																	parameters[parameter.Name] = parameter
+																}
+
+																if rawEvent.Type == "EVENT_TYPE_PBX_AUTO_ATTENDANT" && rawEvent.Name == "AUTO_ATTENDANT_PUBLISHED" {
+																	return nil
+																}
+
+																return app.Div().
+																	Style("padding-left", "1em").
+																	Body(
+																		app.Span().Text(parameters["PARAM_SOURCE"].Value+" -> "+parameters["PARAM_DESTINATION"].Value),
+																		app.Br(),
+																		app.Span().Text(rawEvent.Type),
+																		app.Text(" | "),
+																		app.Span().Text(rawEvent.Name),
+																		app.Text(" ("+rawEvent.Status.EventStatus+")"),
+																		app.Br(),
+																		app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
+																			return app.Span().Text("Ring Group: " + parameters["PARAM_RING_GROUP_NAME"].Value)
+																		}),
+																		app.If(parameters["PARAM_RING_GROUP_NAME"] != nil, func() app.UI {
+																			return app.Br()
+																		}),
+																		app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
+																			return app.Span().Text("Distribution ID: " + parameters["PARAM_DISTRIBUTION_ID"].Value)
+																		}),
+																		app.If(parameters["PARAM_DISTRIBUTION_ID"] != nil, func() app.UI {
+																			return app.Br()
+																		}),
+																		app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
+																			return app.Span().Text("Auto Attendant: " + parameters["PARAM_AUTO_ATTENDANT_NAME"].Value)
+																		}),
+																		app.If(parameters["PARAM_AUTO_ATTENDANT_NAME"] != nil, func() app.UI {
+																			return app.Br()
+																		}),
+																		app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
+																			return app.Span().Text("Duration: " + time.Duration(time.Duration(parameters["PARAM_DURATION"].IntValue)*time.Millisecond).String())
+																		}),
+																		app.If(parameters["PARAM_DURATION"] != nil && parameters["PARAM_DURATION"].IntValue > 0, func() app.UI {
+																			return app.Span().Text(" ")
+																		}),
+																		app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
+																			return app.Span().Text("Ring Duration: " + time.Duration(time.Duration(parameters["PARAM_RING_DURATION"].IntValue)*time.Millisecond).String())
+																		}),
+																		app.If(parameters["PARAM_RING_DURATION"] != nil && parameters["PARAM_RING_DURATION"].IntValue > 0, func() app.UI {
+																			return app.Span().Text(" ")
+																		}),
+																	)
+															}),
+														)
+												}),
+											),
+									)
+							}),
+						}
 					}),
 				}
 			}),
@@ -977,24 +1005,51 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 	})
 }
 
-func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) error {
+func (c *CallsPage) login(ctx app.Context) error {
+	slog.InfoContext(ctx.Context, "CallPage: login.")
+	c.loggingIn = true
+	defer func() {
+		c.loggingIn = false
+		ctx.Update()
+	}()
+
+	if c.authClient == nil {
+		slog.ErrorContext(ctx.Context, "CallPage: login: authClient is nil")
+		return fmt.Errorf("authClient is nil")
+	}
+
+	err := c.authClient.RequestAccessToken()
+	if err != nil {
+		slog.ErrorContext(ctx.Context, "CallPage: login: error requesting access token.", "err", err)
+		return fmt.Errorf("failed to refresh token: %w", err)
+	}
+
+	err = c.setTokenAsPartOfLoginWorkflow(ctx, c.authClient.Token())
+	if err != nil {
+		slog.ErrorContext(ctx.Context, "CallPage: login: error logging in with token.", "err", err)
+		return fmt.Errorf("failed to login with token: %w", err)
+	}
+
+	return nil
+}
+
+func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.Token) error {
 	tokenSource := oauth2.StaticTokenSource(&token)
-	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: tokenSource", "tokenSource", tokenSource)
+	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: tokenSource.", "tokenSource", tokenSource)
 
 	googleOauthClient, err := googleoauth2.NewService(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
-		slog.ErrorContext(ctx.Context, "CallPage: loginWithToken: error", "err", err)
+		slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: error creating google oauth client.", "err", err)
 		return fmt.Errorf("failed to create google oauth client: %w", err)
 	}
 
-	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: googleOauthClient", "googleOauthClient", googleOauthClient)
+	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: googleOauthClient created.", "googleOauthClient", googleOauthClient)
 	userInfo, err := googleOauthClient.Userinfo.Get().Do()
 	if err != nil {
-		slog.ErrorContext(ctx.Context, "CallPage: loginWithToken: could not get user info", "err", err)
+		slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: could not get user info.", "err", err)
 
-		var retrieveErr *googleapi.Error
-		if errors.As(err, &retrieveErr) {
-			slog.ErrorContext(ctx.Context, "CallPage: loginWithToken: oauth2 error", "ErrorCode", retrieveErr.Code)
+		if retrieveErr, ok := errors.AsType[*googleapi.Error](err); ok {
+			slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: oauth2 error.", "Code", retrieveErr.Code)
 			if retrieveErr.Code == 401 {
 				c.logout(ctx)
 			}
@@ -1002,15 +1057,19 @@ func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) error {
 
 		return fmt.Errorf("failed to get user info: %w", err)
 	}
-	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: userInfo", "userInfo", userInfo)
+	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: userInfo retrieved.", "userInfo", userInfo)
 	c.userInfo = userInfo
+	ctx.SetState("user-info", c.userInfo).Persist()
+
+	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: Sending snackbar message.", "Email", c.userInfo.Email)
+	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Text("You are logged in as "+c.userInfo.Email))
 
 	adminClient, err := admin.NewService(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
-		slog.ErrorContext(ctx.Context, "CallPage: loginWithToken: could not create admin client", "err", err)
+		slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: could not create admin client.", "err", err)
 		return fmt.Errorf("failed to create admin client: %w", err)
 	}
-	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: adminClient", "adminClient", adminClient)
+	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: adminClient created.", "adminClient", adminClient)
 	c.adminClient = adminClient
 
 	return nil
@@ -1060,7 +1119,7 @@ func (c *CallsPage) refreshToken(ctx app.Context) error {
 		return fmt.Errorf("failed to refresh token: %w", err)
 	}
 
-	err = c.loginWithToken(ctx, c.authClient.Token())
+	err = c.setTokenAsPartOfLoginWorkflow(ctx, c.authClient.Token())
 	if err != nil {
 		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: error", "err", err)
 		return fmt.Errorf("failed to login with token: %w", err)

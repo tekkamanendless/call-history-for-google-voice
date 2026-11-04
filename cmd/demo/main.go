@@ -30,7 +30,7 @@ func main() {
 
 	{
 		logLevel := "info"
-		if value := os.Getenv("LOG_LEVEL"); value != "" {
+		if value := app.Getenv("LOG_LEVEL"); value != "" {
 			logLevel = value
 		}
 		slogConfig := slog.HandlerOptions{
@@ -92,7 +92,7 @@ func main() {
 	}
 
 	disableServiceWorker := false
-	if value := os.Getenv("DISABLE_SERVICE_WORKER"); value != "" {
+	if value := app.Getenv("DISABLE_SERVICE_WORKER"); value != "" {
 		v, err := strconv.ParseBool(value)
 		if err != nil {
 			slog.ErrorContext(ctx, "Could not parse DISABLE_SERVICE_WORKER", "err", err)
@@ -102,7 +102,7 @@ func main() {
 	}
 
 	generateStaticFiles := false
-	if value := os.Getenv("GENERATE_STATIC_FILES"); value != "" {
+	if value := app.Getenv("GENERATE_STATIC_FILES"); value != "" {
 		v, err := strconv.ParseBool(value)
 		if err != nil {
 			slog.ErrorContext(ctx, "Could not parse GENERATE_STATIC_FILES", "err", err)
@@ -147,19 +147,6 @@ func main() {
 		},
 	)
 
-	// Once the routes set up, the next thing to do is to either launch the app
-	// or the server that serves the app.
-	//
-	// When executed on the client-side, the RunWhenOnBrowser() function
-	// launches the app,  starting a loop that listens for app events and
-	// executes client instructions. Since it is a blocking call, the code below
-	// it will never be executed.
-	//
-	// When executed on the server-side, RunWhenOnBrowser() does nothing, which
-	// lets room for server implementation without the need for precompiling
-	// instructions.
-	app.RunWhenOnBrowser()
-
 	blazarApp := blazarapp.NewApp(blazarapp.Config{
 		Name:        "Call History for Google Voice",
 		Description: "Call History for Google Voice",
@@ -172,6 +159,9 @@ func main() {
 			//`<meta name="referrer" content="unsafe-url">`,
 			//`<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' http://localhost:* https://accounts.google.com; connect-src 'self' http://localhost:* https://*.google.com; frame-src https://*.google.com; img-src 'self' https://*.google.com; style-src 'self' 'unsafe-inline' https://*.google.com;">`,
 		},
+		Env: map[string]string{
+			"LOG_LEVEL": os.Getenv("LOG_LEVEL"),
+		},
 	})
 	blazarApp.AddPlugin(blazarapp.DefaultPlugins()...)
 	blazarApp.AddPlugin(mainplugin.NewPlugin(mainplugin.Config{
@@ -183,6 +173,8 @@ func main() {
 		blazarApp.DisableServiceWorker(disableServiceWorker)
 	}
 	blazarApp.AutoDisableServiceWorker(true)
+
+	blazarApp.RunWhenOnBrowser()
 
 	wrapper := http.NewServeMux()
 	wrapper.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
