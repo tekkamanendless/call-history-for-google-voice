@@ -29,6 +29,7 @@ type CallsPage struct {
 	timezone    *time.Location
 	authClient  *googleoauthjs.TokenClient
 	userInfo    *googleoauth2.Userinfo
+	userToken   *oauth2.Token
 	adminClient *admin.Service
 
 	configuration Configuration
@@ -107,10 +108,15 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 
 	loginCallback := func(token oauth2.Token) {
 		ctx.Async(func() {
+			slog.InfoContext(ctx.Context, "CallPage: OnMount: loginCallback", "token", token)
+
+			c.userToken = &token
 			c.loginWithToken(ctx, token)
 
 			ctx.SetState("user-info", c.userInfo).Persist()
-			ctx.SetState("user-token", token).Persist()
+			ctx.SetState("user-token", c.userToken).Persist()
+
+			blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Text("You are logged in as "+c.userInfo.Email))
 
 			ctx.Update()
 		})
@@ -132,14 +138,14 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 	)
 
 	{
-		var token oauth2.Token
-		ctx.GetState("user-token", &token)
-		if token.AccessToken != "" {
-			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token", "token", token)
-			err := c.loginWithToken(ctx, token)
+		ctx.GetState("user-token", &c.userToken)
+		if c.userToken != nil && c.userToken.AccessToken != "" {
+			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token", "token", c.userToken)
+			err := c.loginWithToken(ctx, *c.userToken)
 			if err != nil {
 				slog.ErrorContext(ctx.Context, "CallPage: OnMount: Could not log in with saved token.", "err", err)
 			} else {
+				slog.InfoContext(ctx.Context, "CallPage: OnMount: Running initial search")
 				c.search(ctx)
 			}
 		}
@@ -155,6 +161,8 @@ func (c *CallsPage) OnNav(ctx app.Context) {
 func (c *CallsPage) Render() app.UI {
 	return blazar.Page().
 		Body(
+			blazar.Snackbar().
+				Observe("snackbar-message"),
 			app.If(c.userInfo == nil, func() app.UI {
 				return app.Div().
 					Body(
@@ -165,10 +173,14 @@ func (c *CallsPage) Render() app.UI {
 								err := c.authClient.RequestAccessToken()
 								if err != nil {
 									slog.ErrorContext(ctx.Context, "CallPage: Render: could not request access token", "err", err)
+									blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Could not sign in with Google: "+err.Error()))
 									return
 								}
 
-								c.search(ctx)
+								ctx.Defer(func(ctx app.Context) {
+									slog.InfoContext(ctx.Context, "CallPage: Running search after Google login")
+									c.search(ctx)
+								})
 							}),
 					)
 			}),
@@ -967,7 +979,6 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 
 func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) error {
 	tokenSource := oauth2.StaticTokenSource(&token)
-	//oauthClient := oauth2.NewClient(ctx, tokenSource)
 	slog.InfoContext(ctx.Context, "CallPage: loginWithToken: tokenSource", "tokenSource", tokenSource)
 
 	googleOauthClient, err := googleoauth2.NewService(ctx, option.WithTokenSource(tokenSource))
@@ -1007,15 +1018,16 @@ func (c *CallsPage) loginWithToken(ctx app.Context, token oauth2.Token) error {
 
 // tokenIsExpired returns true if the token is expired.
 func (c *CallsPage) tokenIsExpired(ctx app.Context) bool {
-	var token oauth2.Token
-	ctx.GetState("user-token", &token)
-	if token.AccessToken != "" {
-		if token.Expiry.Before(time.Now()) {
+	if c.userToken == nil {
+		return true
+	}
+	if c.userToken.AccessToken != "" {
+		if c.userToken.Expiry.Before(time.Now()) {
 			return true
 		}
 	}
 
-	tokenInfo, err := c.authClient.TokenInfo(ctx.Context, token.AccessToken)
+	tokenInfo, err := c.authClient.TokenInfo(ctx.Context, c.userToken.AccessToken)
 	if err != nil {
 		slog.ErrorContext(ctx.Context, "CallPage: tokenIsExpired: error", "err", err)
 		return true
@@ -1033,6 +1045,10 @@ func (c *CallsPage) refreshToken(ctx app.Context) error {
 	if c.authClient == nil {
 		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: authClient is nil")
 		return fmt.Errorf("authClient is nil")
+	}
+	if c.userInfo == nil {
+		slog.ErrorContext(ctx.Context, "CallPage: refreshToken: userInfo is nil")
+		return fmt.Errorf("userInfo is nil")
 	}
 
 	err := c.authClient.RequestAccessToken(
@@ -1058,6 +1074,8 @@ func (c *CallsPage) logout(ctx app.Context) {
 	c.userInfo = nil
 	ctx.SetState("user-info", nil).Persist()
 	ctx.SetState("user-token", nil).Persist()
+
+	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Text("You have been logged out."))
 }
 
 func (c *CallsPage) search(ctx app.Context) {
@@ -1122,6 +1140,7 @@ func (c *CallsPage) search(ctx app.Context) {
 				ctx.Dispatch(func(ctx app.Context) {
 					c.searching = false
 				})
+				blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Error searching: "+err.Error()))
 				return
 			}
 		}
