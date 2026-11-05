@@ -198,7 +198,7 @@ func (c *CallsPage) Render() app.UI {
 											err := c.login(ctx)
 											if err != nil {
 												slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
-												blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Could not sign in with Google: "+err.Error()))
+												blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Could not sign in with Google: "+err.Error()))
 												return
 											}
 
@@ -610,7 +610,10 @@ func (c *CallsPage) renderCallSide(side string, phoneNumber string, name string)
 		blazar.Copy().
 			Style("text-wrap", "nowrap").
 			Value(formatPhoneNumber(phoneNumber)).
-			Text(formatPhoneNumber(phoneNumber)),
+			Text(formatPhoneNumber(phoneNumber)).
+			OnCopy(func(ctx app.Context, value string) {
+				blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Duration(3*time.Second).Text("Copied to clipboard: "+value))
+			}),
 	)
 	return app.Div().
 		Class("call-side " + side).
@@ -1071,7 +1074,7 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 	ctx.SetState("user-info", c.userInfo).Persist()
 
 	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: Sending snackbar message.", "Email", c.userInfo.Email)
-	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Text("You are logged in as "+c.userInfo.Email))
+	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Text("You are logged in as "+c.userInfo.Email))
 
 	adminClient, err := admin.NewService(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
@@ -1150,7 +1153,7 @@ func (c *CallsPage) logout(ctx app.Context) {
 	c.callRows = nil
 	c.filteredCallRows = nil
 
-	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Text("You have been logged out."))
+	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Text("You have been logged out."))
 }
 
 func (c *CallsPage) search(ctx app.Context) {
@@ -1215,7 +1218,7 @@ func (c *CallsPage) search(ctx app.Context) {
 				ctx.Dispatch(func(ctx app.Context) {
 					c.searching = false
 				})
-				blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Error searching: "+err.Error()))
+				blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Error searching: "+err.Error()))
 				return
 			}
 		}
@@ -1242,7 +1245,7 @@ func (c *CallsPage) search(ctx app.Context) {
 					c.searching = false
 					ctx.Update()
 				})
-				blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Bad().Text("Error searching: "+err.Error()))
+				blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Error searching: "+err.Error()))
 				return
 			}
 			slog.InfoContext(ctx.Context, "CallPage: search: activities", "activities", len(activities.Items))
