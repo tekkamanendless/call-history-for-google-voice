@@ -15,6 +15,8 @@ import (
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
 	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
 	"golang.org/x/oauth2"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	admin "google.golang.org/api/admin/reports/v1"
 	"google.golang.org/api/googleapi"
 	googleoauth2 "google.golang.org/api/oauth2/v2"
@@ -139,6 +141,8 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 
 	ctx.Async(func() {
 		ctx.GetState("user-token", &c.userToken)
+		ctx.GetState("user-info", &c.userInfo)
+
 		if c.userToken != nil && c.userToken.AccessToken != "" {
 			slog.InfoContext(ctx.Context, "CallPage: OnMount: Saved token found.", "token", c.userToken)
 
@@ -234,68 +238,68 @@ func (c *CallsPage) Render() app.UI {
 							blazar.Collapse().
 								Label("Configuration").
 								Open(true).
+								SummaryText(cases.Title(language.AmericanEnglish).String(strings.ReplaceAll(c.configuration.Timeframe, "-", " "))).
 								Body(
-									blazar.Form().
-										Body(
-											blazar.Select().
-												Label("Timeframe").
-												AllowedValue(
-													blazar.SelectOption{
-														Label: "Past 24 hours",
-														Value: "past-24-hours",
-													},
-													blazar.SelectOption{
-														Label: "Past 7 days",
-														Value: "past-7-days",
-													},
-													blazar.SelectOption{
-														Label: "Past 30 days",
-														Value: "past-30-days",
-													},
-													blazar.SelectOption{
-														Label: "Past 90 days",
-														Value: "past-90-days",
-													},
-													blazar.SelectOption{
-														Label: "Past 180 days",
-														Value: "past-180-days",
-													},
-													blazar.SelectOption{
-														Label: "Custom...",
-														Value: "custom",
-													},
-												).
-												Bind(&c.configuration.Timeframe).
+									blazar.Select().
+										Label("Timeframe").
+										AllowedValue(
+											blazar.SelectOption{
+												Label: "Past 24 hours",
+												Value: "past-24-hours",
+											},
+											blazar.SelectOption{
+												Label: "Past 7 days",
+												Value: "past-7-days",
+											},
+											blazar.SelectOption{
+												Label: "Past 30 days",
+												Value: "past-30-days",
+											},
+											blazar.SelectOption{
+												Label: "Past 90 days",
+												Value: "past-90-days",
+											},
+											blazar.SelectOption{
+												Label: "Past 180 days",
+												Value: "past-180-days",
+											},
+											blazar.SelectOption{
+												Label: "Custom...",
+												Value: "custom",
+											},
+										).
+										Bind(&c.configuration.Timeframe).
+										On("change", func(ctx app.Context, e app.Event) {
+											ctx.SetState("configuration", c.configuration).Persist()
+										}),
+									app.IfSlice(c.configuration.Timeframe == "custom", func() []app.UI {
+										return []app.UI{
+											blazar.Input[string]().
+												Label("Start Time").
+												Clearable(true).
+												Type("date").
+												Bind(&c.configuration.StartTimeString).
 												On("change", func(ctx app.Context, e app.Event) {
 													ctx.SetState("configuration", c.configuration).Persist()
 												}),
-											app.IfSlice(c.configuration.Timeframe == "custom", func() []app.UI {
-												return []app.UI{
-													blazar.Input[string]().
-														Label("Start Time").
-														Clearable(true).
-														Type("date").
-														Bind(&c.configuration.StartTimeString).
-														On("change", func(ctx app.Context, e app.Event) {
-															ctx.SetState("configuration", c.configuration).Persist()
-														}),
-													blazar.Input[string]().
-														Label("End Time").
-														Clearable(true).
-														Type("date").
-														Bind(&c.configuration.EndTimeString).
-														On("change", func(ctx app.Context, e app.Event) {
-															ctx.SetState("configuration", c.configuration).Persist()
-														}),
-												}
-											}),
-										).
-										Action(blazar.FormAction{
-											Name:     "Search",
-											Icon:     tabler.IconOutlineSearch,
-											Function: c.search,
-										}),
+											blazar.Input[string]().
+												Label("End Time").
+												Clearable(true).
+												Type("date").
+												Bind(&c.configuration.EndTimeString).
+												On("change", func(ctx app.Context, e app.Event) {
+													ctx.SetState("configuration", c.configuration).Persist()
+												}),
+										}
+									}),
 								),
+							blazar.Form().
+								Body().
+								Action(blazar.FormAction{
+									Name:     "Search",
+									Icon:     tabler.IconOutlineSearch,
+									Function: c.search,
+								}),
 							blazar.ProgressBar().
 								Style("visibility", func() string {
 									if c.searching {
