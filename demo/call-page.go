@@ -229,7 +229,12 @@ func (c *CallsPage) Render() app.UI {
 						return app.Div().
 							Body(
 								blazar.Button().
-									Label("Sign in with Google").
+									Label(func() string {
+										if c.loggingIn || c.loggingInViaButton {
+											return "Signing in with Google..."
+										}
+										return "Sign in with Google"
+									}()).
 									Icon(tabler.IconFilledBrandGoogle).
 									Disabled(c.loggingIn || c.loggingInViaButton).
 									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
