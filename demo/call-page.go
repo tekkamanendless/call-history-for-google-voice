@@ -79,6 +79,7 @@ type DBContact struct {
 	Name         string `json:"name"`
 	PhoneNumber  string `json:"phoneNumber"`
 	EmailAddress string `json:"emailAddress"`
+	Link         string `json:"link"`
 }
 
 func (c *CallsPage) OnMount(ctx app.Context) {
@@ -520,7 +521,9 @@ type CallRow struct {
 	Direction       string        // The direction of the call.
 	Source          string        // The source phone number.
 	SourceName      string        // The name of the source.
+	SourceLink      string        // The link to the source.
 	Destination     string        // The destination phone number.
+	DestinationLink string        // The link to the destination.
 	DestinationName string        // The name of the destination.
 	Duration        time.Duration // The duration of the call.
 	ResultUser      string
@@ -666,14 +669,27 @@ func (c *CallsPage) renderCallFilter() app.UI {
 		)
 }
 
-func (c *CallsPage) renderCallSide(side string, phoneNumber string, name string) app.UI {
+func (c *CallsPage) renderCallSide(side string, phoneNumber string, name string, link string) app.UI {
 	body := []app.UI{}
 	if name != "" {
-		body = append(body,
-			app.Span().
-				Class("name").
-				Text(name),
-		)
+		if link != "" {
+			body = append(body,
+				app.A().
+					Href(link).
+					Target("_blank").
+					Body(
+						app.Span().
+							Class("name").
+							Text(name),
+					),
+			)
+		} else {
+			body = append(body,
+				app.Span().
+					Class("name").
+					Text(name),
+			)
+		}
 	}
 	body = append(body,
 		blazar.Copy().
@@ -745,7 +761,7 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 					return app.Div().
 						Class("call-side-container").
 						Body(
-							c.renderCallSide("source", row.Source, row.SourceName),
+							c.renderCallSide("source", row.Source, row.SourceName, row.SourceLink),
 							blazar.Icon().
 								Class("filter-icon").
 								Icon(func() string {
@@ -788,7 +804,7 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 					return app.Div().
 						Class("call-side-container").
 						Body(
-							c.renderCallSide("destination", row.Destination, row.DestinationName),
+							c.renderCallSide("destination", row.Destination, row.DestinationName, row.DestinationLink),
 							blazar.Icon().
 								Class("filter-icon").
 								Icon(func() string {
@@ -879,7 +895,9 @@ func (c *CallsPage) buildCallRows(calls []*Call) []CallRow {
 			Time:            call.Time,
 			Source:          call.Source,
 			SourceName:      call.SourceName,
+			SourceLink:      call.SourceLink,
 			Destination:     call.Destination,
+			DestinationLink: call.DestinationLink,
 			DestinationName: call.DestinationName,
 			Duration:        call.CallDuration,
 		}
@@ -918,6 +936,7 @@ func (c *CallsPage) buildCallRows(calls []*Call) []CallRow {
 		}
 		if row.Direction == DirectionOut {
 			resultUser = call.SourceName
+			row.SourceLink = call.SourceLink
 			if call.CallDuration == 0 {
 				incomplete = true
 			}
@@ -1229,6 +1248,13 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 			if len(contact.GDEmails) > 0 {
 				emailAddress = contact.GDEmails[0].Address
 			}
+			link := ""
+			for _, property := range contact.GDExtendedProperties {
+				if strings.HasPrefix(property.Value, "http://") || strings.HasPrefix(property.Value, "https://") {
+					link = property.Value
+					break
+				}
+			}
 
 			i := slices.IndexFunc(c.contacts, func(c DBContact) bool {
 				return c.ID == contact.ID
@@ -1239,6 +1265,7 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 					Name:         contact.Title,
 					PhoneNumber:  phoneNumber,
 					EmailAddress: emailAddress,
+					Link:         link,
 				})
 			} else {
 				c.contacts[i] = DBContact{
@@ -1246,6 +1273,7 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 					Name:         contact.Title,
 					PhoneNumber:  phoneNumber,
 					EmailAddress: emailAddress,
+					Link:         link,
 				}
 			}
 		}
@@ -1256,7 +1284,7 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 		ctx.SetState("contacts", c.contacts).Persist()
 
 		if !lastUpdatedTime.IsZero() {
-			ctx.SetState("contacts-sync", lastUpdatedTime.Format(time.RFC3339)).Persist()
+			ctx.SetState("contacts-sync", lastUpdatedTime.Add(1*time.Second).Format(time.RFC3339)).Persist()
 		}
 	}
 
@@ -1323,6 +1351,11 @@ func (c *CallsPage) logout(ctx app.Context) {
 
 	c.userToken = nil
 	ctx.SetState("user-token", nil).Persist()
+
+	c.contacts = nil
+	c.contactByPhoneNumber = nil
+	ctx.SetState("contacts", nil).Persist()
+	ctx.SetState("contacts-sync", nil).Persist()
 
 	c.rawActivities = nil
 	c.calls = nil
@@ -1449,7 +1482,9 @@ type Call struct {
 	Time            time.Time     // The time of the call.
 	Source          string        // The source phone number.
 	SourceName      string        // The name of the source.
+	SourceLink      string        // The link to the source.
 	Destination     string        // The destination phone number.
+	DestinationLink string        // The link to the destination.
 	DestinationType string        // One of: auto-attendant, ring-group, phone.
 	DestinationName string        // The name of the destination.
 	RingDuration    time.Duration // The duration of the ring.
@@ -1550,11 +1585,13 @@ func (c *CallsPage) parseCalls(ctx context.Context, rawActivities []*admin.Activ
 			if call.SourceName == "" {
 				if contact, ok := c.contactByPhoneNumber[call.Source]; ok {
 					call.SourceName = contact.Name
+					call.SourceLink = contact.Link
 				}
 			}
 			if call.DestinationName == "" {
 				if contact, ok := c.contactByPhoneNumber[call.Destination]; ok {
 					call.DestinationName = contact.Name
+					call.DestinationLink = contact.Link
 				}
 			}
 			calls = append(calls, call)
