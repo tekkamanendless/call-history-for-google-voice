@@ -15,6 +15,7 @@ import (
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
 	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
 	"github.com/tekkamanendless/googlecontactsfeed"
+	"github.com/tekkamanendless/httperror"
 	"golang.org/x/oauth2"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -38,8 +39,9 @@ type CallsPage struct {
 	configuration Configuration
 	filter        Filter
 
-	ready     bool
-	loggingIn bool
+	ready     bool // This will be true when the initial setup is all ready.
+	loggedIn  bool // This will be true when the user is logged in.
+	loggingIn bool // This will be true when the user is logging in.
 
 	searching        bool
 	searched         bool
@@ -86,6 +88,7 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 	slog.InfoContext(ctx.Context, "CallPage: OnMount")
 
 	c.ready = false
+	c.loggedIn = false
 	c.loggingIn = false
 
 	c.configuration = Configuration{
@@ -166,45 +169,6 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		)
 	}
 
-	/*
-		var wg sync.WaitGroup
-		wg.Add(1)
-		{
-			databaseName := "library"
-			jsRequest := app.Window().Get("indexedDB").Call("open", databaseName, 1)
-			jsRequest.Set("onupgradeneeded", app.FuncOf(func(this app.Value, args []app.Value) any {
-				jsEvent := args[0]
-				jsDB := jsEvent.Get("target").Get("result")
-
-				if !jsDB.Get("objectStoreNames").Call("contains", "contacts").Bool() {
-					jsContactsStore := jsDB.Call("createObjectStore", "contacts", map[string]any{
-						"keyPath": "id",
-					})
-					jsContactsStore.Call("createIndex", "phoneNumber", "phoneNumber", map[string]any{
-						"unique": false,
-					})
-				}
-				if !jsDB.Get("objectStoreNames").Call("contains", "settings").Bool() {
-					jsDB.Call("createObjectStore", "settings", map[string]any{
-						"keyPath": "id",
-					})
-				}
-				slog.InfoContext(ctx.Context, "CallPage: OnMount: Indexeddb upgraded.", "jsDB", jsDB)
-				return nil
-			}))
-			jsRequest.Set("onsuccess", app.FuncOf(func(this app.Value, args []app.Value) any {
-				jsEvent := args[0]
-				jsDB := jsEvent.Get("target").Get("result")
-				slog.InfoContext(ctx.Context, "CallPage: OnMount: Indexeddb opened.", "jsDB", jsDB)
-
-				c.jsDB = jsDB
-				wg.Done()
-				return nil
-			}))
-			wg.Wait()
-		}
-	*/
-
 	ctx.Async(func() {
 		ctx.GetState("user-token", &c.userToken)
 		ctx.GetState("user-info", &c.userInfo)
@@ -246,17 +210,21 @@ func (c *CallsPage) OnNav(ctx app.Context) {
 }
 
 func (c *CallsPage) Render() app.UI {
+	slog.InfoContext(context.TODO(), "CallPage: Render: ready", "ready", c.ready, "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
 	return blazar.Page().
 		Body(
 			blazar.Snackbar().
 				Observe("snackbar-message"),
 			app.IfSlice(!c.ready, func() []app.UI {
 				return []app.UI{
-					app.Div().Text("Loading..."),
+					app.Div().Text("Performing initial setup..."),
 				}
 			}).ElseSlice(func() []app.UI {
 				return []app.UI{
-					app.If(c.ready && c.userInfo == nil, func() app.UI {
+					app.If(c.loggingIn, func() app.UI {
+						return app.Div().Text("Logging in with Google...")
+					}).ElseIf(!c.loggedIn, func() app.UI {
 						return app.Div().
 							Body(
 								blazar.Button().
@@ -264,43 +232,40 @@ func (c *CallsPage) Render() app.UI {
 									Icon(tabler.IconFilledBrandGoogle).
 									Disabled(c.loggingIn).
 									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-										ctx.Async(func() {
-											err := c.login(ctx)
-											if err != nil {
-												slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
-												blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Could not sign in with Google: "+err.Error()))
-												return
-											}
+										//ctx.Defer(func(ctx app.Context) {
+										err := c.login(ctx)
+										if err != nil {
+											slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
+											blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Could not sign in with Google: "+err.Error()))
+											return
+										}
 
-											ctx.Defer(func(ctx app.Context) {
-												slog.InfoContext(ctx.Context, "CallPage: Running search after Google login.")
-												c.search(ctx)
-											})
+										ctx.Defer(func(ctx app.Context) {
+											slog.InfoContext(ctx.Context, "CallPage: Running search after Google login.")
+											c.search(ctx)
 										})
+										//})
 									}),
 							)
-					}),
-					app.If(c.ready && c.userInfo != nil, func() app.UI {
-						/*
-							return app.Div().
-								Body(
-									app.Img().Src(c.userInfo.Picture).Width(32).Height(32),
-									app.Span().Text(c.userInfo.Name),
-								)
-						*/
-						return app.Div().
-							Body(
-								blazar.Button().
-									Label("Log out as " + c.userInfo.Name).
-									Icon(tabler.IconOutlineLogout).
-									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-										c.logout(ctx)
-										ctx.Update()
-									}),
-							)
-					}),
-					app.IfSlice(c.ready && c.userInfo != nil, func() []app.UI {
+					}).ElseSlice(func() []app.UI {
 						return []app.UI{
+							/*
+								app.Div().
+									Body(
+										app.Img().Src(c.userInfo.Picture).Width(32).Height(32),
+										app.Span().Text(c.userInfo.Name),
+									),
+							*/
+							app.Div().
+								Body(
+									blazar.Button().
+										Label("Log out as " + c.userInfo.Name).
+										Icon(tabler.IconOutlineLogout).
+										OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+											c.logout(ctx)
+											ctx.Update()
+										}),
+								),
 							blazar.Collapse().
 								Label("Configuration").
 								Open(true).
@@ -1107,9 +1072,15 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 
 func (c *CallsPage) login(ctx app.Context) error {
 	slog.InfoContext(ctx.Context, "CallPage: login.")
+
 	c.loggingIn = true
+	slog.InfoContext(ctx.Context, "CallPage: login: Started.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
 	defer func() {
 		c.loggingIn = false
+
+		slog.InfoContext(ctx.Context, "CallPage: login: Complete.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
 		ctx.Update()
 	}()
 
@@ -1134,6 +1105,13 @@ func (c *CallsPage) login(ctx app.Context) error {
 }
 
 func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.Token) error {
+	defer func() {
+		c.loggedIn = true
+		slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: Complete.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
+		ctx.Update()
+	}()
+
 	tokenSource := oauth2.StaticTokenSource(&token)
 	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: tokenSource.", "tokenSource", tokenSource)
 
@@ -1200,30 +1178,18 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 			UpdatedMin: startTime,
 		})
 		if err != nil {
-			slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: could not get contacts.", "err", err)
-			return fmt.Errorf("failed to get contacts: %w", err)
+			if errors.Is(err, httperror.ErrStatusForbidden) {
+				// The user does not have access to the legacy shared contacts API.
+				slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: user does not have access to the legacy shared contacts API.", "err", err)
+
+				// Continue with zero contacts.
+				contacts = []googlecontactsfeed.GoogleContact{}
+			} else {
+				slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: could not get contacts.", "err", err)
+				return fmt.Errorf("failed to get contacts: %w", err)
+			}
 		}
 		slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: Got the contacts.", "contacts", len(contacts))
-
-		/*
-			jsSettingsStore := c.jsDB.Call("transaction", "settings", "readwrite").Call("objectStore", "settings")
-			jsContactsStore.Call("get", "settings", "global")
-
-			jsContactsStore := c.jsDB.Call("transaction", "contacts", "readwrite").Call("objectStore", "contacts")
-			for _, contact := range contacts {
-				jsContact := map[string]any{
-					"id":   contact.ID,
-					"name": contact.Name,
-				}
-				if len(contact.GDEmails) > 0 {
-					jsContact["emailAddress"] = contact.GDEmails[0]
-				}
-				if len(contact.GDPhoneNumbers) > 0 {
-					jsContact["phoneNumber"] = contact.GDPhoneNumbers[0]
-				}
-				jsContactsStore.Call("put", jsContact)
-			}
-		*/
 
 		var lastUpdatedTime time.Time
 		for _, contact := range contacts {
@@ -1286,6 +1252,7 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 		if !lastUpdatedTime.IsZero() {
 			ctx.SetState("contacts-sync", lastUpdatedTime.Add(1*time.Second).Format(time.RFC3339)).Persist()
 		}
+		slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: contacts synced.", "lastUpdatedTime", lastUpdatedTime)
 	}
 
 	return nil
@@ -1361,6 +1328,9 @@ func (c *CallsPage) logout(ctx app.Context) {
 	c.calls = nil
 	c.callRows = nil
 	c.filteredCallRows = nil
+
+	c.loggedIn = false
+	c.loggingIn = false
 
 	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Text("You have been logged out."))
 }
