@@ -14,6 +14,7 @@ import (
 	"github.com/go-app-blazar/tabler-font"
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
 	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
+	"github.com/tekkamanendless/googlecontactsfeed"
 	"golang.org/x/oauth2"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -46,6 +47,10 @@ type CallsPage struct {
 	calls            []*Call           // Debug
 	callRows         []CallRow
 	filteredCallRows []CallRow
+
+	//jsDB app.Value // The IndexedDB database.
+	contacts             []DBContact
+	contactByPhoneNumber map[string]DBContact
 }
 
 type Configuration struct {
@@ -67,6 +72,13 @@ type Filter struct {
 	ResultMessage       bool   `json:"resultMessage"`
 	ResultVoicemail     bool   `json:"resultVoicemail"`
 	PhoneNumber         string `json:"phoneNumber"`
+}
+
+type DBContact struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	PhoneNumber  string `json:"phoneNumber"`
+	EmailAddress string `json:"emailAddress"`
 }
 
 func (c *CallsPage) OnMount(ctx app.Context) {
@@ -101,7 +113,6 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 	}
 
 	c.timezone = time.Local
-
 	{
 		jsTimezone := app.Window().Get("Intl").Call("DateTimeFormat").Call("resolvedOptions").Get("timeZone").String()
 		timezone, err := time.LoadLocation(jsTimezone)
@@ -113,6 +124,19 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}
 	}
 	slog.InfoContext(ctx.Context, "CallPage: OnMount: timezone", "timezone", c.timezone)
+
+	c.contacts = []DBContact{}
+	c.contactByPhoneNumber = map[string]DBContact{}
+	{
+		var savedContacts []DBContact
+		ctx.GetState("contacts", &savedContacts)
+		if savedContacts != nil {
+			c.contacts = savedContacts
+			for _, contact := range c.contacts {
+				c.contactByPhoneNumber[contact.PhoneNumber] = contact
+			}
+		}
+	}
 
 	{
 		loginCallback := func(token oauth2.Token) {
@@ -133,11 +157,52 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 				"email",
 				"profile",
 				"https://www.googleapis.com/auth/admin.reports.audit.readonly",
+				"https://www.googleapis.com/auth/contacts.readonly",
+				//"https://www.googleapis.com/auth/directory.readonly",
 			}),
 			googleoauthjs.WithCallback(loginCallback),
 			googleoauthjs.WithErrorCallback(errorCallback),
 		)
 	}
+
+	/*
+		var wg sync.WaitGroup
+		wg.Add(1)
+		{
+			databaseName := "library"
+			jsRequest := app.Window().Get("indexedDB").Call("open", databaseName, 1)
+			jsRequest.Set("onupgradeneeded", app.FuncOf(func(this app.Value, args []app.Value) any {
+				jsEvent := args[0]
+				jsDB := jsEvent.Get("target").Get("result")
+
+				if !jsDB.Get("objectStoreNames").Call("contains", "contacts").Bool() {
+					jsContactsStore := jsDB.Call("createObjectStore", "contacts", map[string]any{
+						"keyPath": "id",
+					})
+					jsContactsStore.Call("createIndex", "phoneNumber", "phoneNumber", map[string]any{
+						"unique": false,
+					})
+				}
+				if !jsDB.Get("objectStoreNames").Call("contains", "settings").Bool() {
+					jsDB.Call("createObjectStore", "settings", map[string]any{
+						"keyPath": "id",
+					})
+				}
+				slog.InfoContext(ctx.Context, "CallPage: OnMount: Indexeddb upgraded.", "jsDB", jsDB)
+				return nil
+			}))
+			jsRequest.Set("onsuccess", app.FuncOf(func(this app.Value, args []app.Value) any {
+				jsEvent := args[0]
+				jsDB := jsEvent.Get("target").Get("result")
+				slog.InfoContext(ctx.Context, "CallPage: OnMount: Indexeddb opened.", "jsDB", jsDB)
+
+				c.jsDB = jsDB
+				wg.Done()
+				return nil
+			}))
+			wg.Wait()
+		}
+	*/
 
 	ctx.Async(func() {
 		ctx.GetState("user-token", &c.userToken)
@@ -1088,6 +1153,113 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: adminClient created.", "adminClient", adminClient)
 	c.adminClient = adminClient
 
+	{
+		domain := ""
+		if i := strings.Index(c.userInfo.Email, "@"); i > 0 {
+			domain = c.userInfo.Email[i+1:]
+		}
+		contactsClient := googlecontactsfeed.NewClient(
+			googlecontactsfeed.WithDomain(domain),
+			googlecontactsfeed.WithAccessToken(c.userToken.AccessToken),
+		)
+
+		var startTime time.Time
+		{
+			var timeString string
+			ctx.GetState("contacts-sync", &timeString)
+			if timeString != "" {
+				t, err := time.Parse(time.RFC3339, timeString)
+				if err != nil {
+					slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: error parsing contacts-sync time.", "err", err)
+				} else {
+					startTime = t
+				}
+			}
+		}
+		contacts, err := contactsClient.GetContacts(ctx, googlecontactsfeed.GetContactsOptions{
+			MaxResults: 100_000,
+			UpdatedMin: startTime,
+		})
+		if err != nil {
+			slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: could not get contacts.", "err", err)
+			return fmt.Errorf("failed to get contacts: %w", err)
+		}
+		slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: Got the contacts.", "contacts", len(contacts))
+
+		/*
+			jsSettingsStore := c.jsDB.Call("transaction", "settings", "readwrite").Call("objectStore", "settings")
+			jsContactsStore.Call("get", "settings", "global")
+
+			jsContactsStore := c.jsDB.Call("transaction", "contacts", "readwrite").Call("objectStore", "contacts")
+			for _, contact := range contacts {
+				jsContact := map[string]any{
+					"id":   contact.ID,
+					"name": contact.Name,
+				}
+				if len(contact.GDEmails) > 0 {
+					jsContact["emailAddress"] = contact.GDEmails[0]
+				}
+				if len(contact.GDPhoneNumbers) > 0 {
+					jsContact["phoneNumber"] = contact.GDPhoneNumbers[0]
+				}
+				jsContactsStore.Call("put", jsContact)
+			}
+		*/
+
+		var lastUpdatedTime time.Time
+		for _, contact := range contacts {
+			if contact.Updated != nil {
+				if lastUpdatedTime.IsZero() || lastUpdatedTime.Before(*contact.Updated) {
+					lastUpdatedTime = *contact.Updated
+				}
+			}
+
+			if contact.Deleted {
+				c.contacts = slices.DeleteFunc(c.contacts, func(c DBContact) bool {
+					return c.ID == contact.ID
+				})
+				continue
+			}
+
+			phoneNumber := ""
+			if len(contact.GDPhoneNumbers) > 0 {
+				phoneNumber = contact.GDPhoneNumbers[0].Value
+			}
+			emailAddress := ""
+			if len(contact.GDEmails) > 0 {
+				emailAddress = contact.GDEmails[0].Address
+			}
+
+			i := slices.IndexFunc(c.contacts, func(c DBContact) bool {
+				return c.ID == contact.ID
+			})
+			if i == -1 {
+				c.contacts = append(c.contacts, DBContact{
+					ID:           contact.ID,
+					Name:         contact.Title,
+					PhoneNumber:  phoneNumber,
+					EmailAddress: emailAddress,
+				})
+			} else {
+				c.contacts[i] = DBContact{
+					ID:           contact.ID,
+					Name:         contact.Title,
+					PhoneNumber:  phoneNumber,
+					EmailAddress: emailAddress,
+				}
+			}
+		}
+		c.contactByPhoneNumber = map[string]DBContact{}
+		for _, contact := range c.contacts {
+			c.contactByPhoneNumber[contact.PhoneNumber] = contact
+		}
+		ctx.SetState("contacts", c.contacts).Persist()
+
+		if !lastUpdatedTime.IsZero() {
+			ctx.SetState("contacts-sync", lastUpdatedTime.Format(time.RFC3339)).Persist()
+		}
+	}
+
 	return nil
 }
 
@@ -1266,7 +1438,7 @@ func (c *CallsPage) search(ctx app.Context) {
 			c.searching = false
 			c.searched = true
 			c.rawActivities = rawActivities
-			c.calls = parseCalls(ctx.Context, rawActivities)
+			c.calls = c.parseCalls(ctx.Context, rawActivities)
 			c.callRows = c.buildCallRows(c.calls)
 			c.filteredCallRows = c.filterCallRows(c.callRows)
 		})
@@ -1289,7 +1461,7 @@ type Call struct {
 	Calls           []*Call       // Only when DestinationType is auto-attendant or ring-group.
 }
 
-func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
+func (c *CallsPage) parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 	calls := []*Call{}
 
 	rawActivitiesCopy := make([]*admin.Activity, len(rawActivities))
@@ -1373,6 +1545,17 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 			}
 			if call.DestinationName == call.Destination {
 				call.DestinationName = ""
+			}
+
+			if call.SourceName == "" {
+				if contact, ok := c.contactByPhoneNumber[call.Source]; ok {
+					call.SourceName = contact.Name
+				}
+			}
+			if call.DestinationName == "" {
+				if contact, ok := c.contactByPhoneNumber[call.Destination]; ok {
+					call.DestinationName = contact.Name
+				}
 			}
 			calls = append(calls, call)
 		}

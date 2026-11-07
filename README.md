@@ -26,3 +26,4 @@ This tool tries to solve that problem by making it easy to see the calls that ca
 
 ## GCP Configuration
 1. Enable the Admin SDK: https://console.developers.google.com/apis/api/admin.googleapis.com/overview
+1. Enable the Contacts API: https://console.cloud.google.com/apis/library/contacts.googleapis.com
