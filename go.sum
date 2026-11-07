@@ -41,6 +41,10 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/tekkamanendless/fork-of-maxence-charriere-go-app/v11 v11.0.0-20260624062618-c2f3e531f36d h1:Dd/ER4ty52bLOcYC+zOK0N6EakLudySILbsHZT+ae88=
 github.com/tekkamanendless/fork-of-maxence-charriere-go-app/v11 v11.0.0-20260624062618-c2f3e531f36d/go.mod h1:03mGNjBIo1LJq9VGPxOcmBFAv/sNL2GIF5LxCV3BRgA=
+github.com/tekkamanendless/googlecontactsfeed v0.1.5 h1:CZQCzkaODg1ebwj+hvsBq3JVkiX8JuRGSR3UTI8EsDI=
+github.com/tekkamanendless/googlecontactsfeed v0.1.5/go.mod h1:A5o3UOdcsqsMwjwQU2qsXzUJzTsQ60fu53Xr9IBR4rY=
+github.com/tekkamanendless/httperror v1.0.1 h1:lKf7qlWcb6Khdxj8ZY3H2GdBX30+J1ACMNgb8jnNr8Y=
+github.com/tekkamanendless/httperror v1.0.1/go.mod h1:tYTDnOTP2Av5x3e2CUf9t671QPMIJvgS/8ErXGQ4pK0=
 github.com/tekkamanendless/httprequest v0.1.1 h1:oYgt5Xd96MznUuWxICj10+ROx3z+OJTigb4XFputrmU=
 github.com/tekkamanendless/httprequest v0.1.1/go.mod h1:e2bLq0td5G+oZPSW55rtY9pNPT85j+Fw4tFCbQBaZvc=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

@@ -14,6 +14,8 @@ import (
 	"github.com/go-app-blazar/tabler-font"
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
 	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
+	"github.com/tekkamanendless/googlecontactsfeed"
+	"github.com/tekkamanendless/httperror"
 	"golang.org/x/oauth2"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -37,8 +39,10 @@ type CallsPage struct {
 	configuration Configuration
 	filter        Filter
 
-	ready     bool
-	loggingIn bool
+	ready              bool // This will be true when the initial setup is all ready.
+	loggedIn           bool // This will be true when the user is logged in.
+	loggingIn          bool // This will be true when the user is logging in.
+	loggingInViaButton bool
 
 	searching        bool
 	searched         bool
@@ -46,6 +50,10 @@ type CallsPage struct {
 	calls            []*Call           // Debug
 	callRows         []CallRow
 	filteredCallRows []CallRow
+
+	//jsDB app.Value // The IndexedDB database.
+	contacts             []DBContact
+	contactByPhoneNumber map[string]DBContact
 }
 
 type Configuration struct {
@@ -69,10 +77,19 @@ type Filter struct {
 	PhoneNumber         string `json:"phoneNumber"`
 }
 
+type DBContact struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	PhoneNumber  string `json:"phoneNumber"`
+	EmailAddress string `json:"emailAddress"`
+	Link         string `json:"link"`
+}
+
 func (c *CallsPage) OnMount(ctx app.Context) {
 	slog.InfoContext(ctx.Context, "CallPage: OnMount")
 
 	c.ready = false
+	c.loggedIn = false
 	c.loggingIn = false
 
 	c.configuration = Configuration{
@@ -101,7 +118,6 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 	}
 
 	c.timezone = time.Local
-
 	{
 		jsTimezone := app.Window().Get("Intl").Call("DateTimeFormat").Call("resolvedOptions").Get("timeZone").String()
 		timezone, err := time.LoadLocation(jsTimezone)
@@ -113,6 +129,19 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}
 	}
 	slog.InfoContext(ctx.Context, "CallPage: OnMount: timezone", "timezone", c.timezone)
+
+	c.contacts = []DBContact{}
+	c.contactByPhoneNumber = map[string]DBContact{}
+	{
+		var savedContacts []DBContact
+		ctx.GetState("contacts", &savedContacts)
+		if savedContacts != nil {
+			c.contacts = savedContacts
+			for _, contact := range c.contacts {
+				c.contactByPhoneNumber[contact.PhoneNumber] = contact
+			}
+		}
+	}
 
 	{
 		loginCallback := func(token oauth2.Token) {
@@ -133,6 +162,8 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 				"email",
 				"profile",
 				"https://www.googleapis.com/auth/admin.reports.audit.readonly",
+				"https://www.googleapis.com/auth/contacts.readonly",
+				//"https://www.googleapis.com/auth/directory.readonly",
 			}),
 			googleoauthjs.WithCallback(loginCallback),
 			googleoauthjs.WithErrorCallback(errorCallback),
@@ -180,25 +211,40 @@ func (c *CallsPage) OnNav(ctx app.Context) {
 }
 
 func (c *CallsPage) Render() app.UI {
+	slog.InfoContext(context.TODO(), "CallPage: Render: ready", "ready", c.ready, "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
 	return blazar.Page().
 		Body(
 			blazar.Snackbar().
 				Observe("snackbar-message"),
 			app.IfSlice(!c.ready, func() []app.UI {
 				return []app.UI{
-					app.Div().Text("Loading..."),
+					app.Div().Text("Performing initial setup..."),
 				}
 			}).ElseSlice(func() []app.UI {
 				return []app.UI{
-					app.If(c.ready && c.userInfo == nil, func() app.UI {
+					app.If(c.loggingIn, func() app.UI {
+						return app.Div().Text("Logging in with Google...")
+					}).ElseIf(!c.loggedIn, func() app.UI {
 						return app.Div().
 							Body(
 								blazar.Button().
-									Label("Sign in with Google").
+									Label(func() string {
+										if c.loggingIn || c.loggingInViaButton {
+											return "Signing in with Google..."
+										}
+										return "Sign in with Google"
+									}()).
 									Icon(tabler.IconFilledBrandGoogle).
-									Disabled(c.loggingIn).
+									Disabled(c.loggingIn || c.loggingInViaButton).
 									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-										ctx.Async(func() {
+										ctx.Dispatch(func(ctx app.Context) {
+											c.loggingInViaButton = true
+										})
+
+										ctx.Defer(func(ctx app.Context) {
+											c.loggingInViaButton = false
+
 											err := c.login(ctx)
 											if err != nil {
 												slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
@@ -213,28 +259,25 @@ func (c *CallsPage) Render() app.UI {
 										})
 									}),
 							)
-					}),
-					app.If(c.ready && c.userInfo != nil, func() app.UI {
-						/*
-							return app.Div().
-								Body(
-									app.Img().Src(c.userInfo.Picture).Width(32).Height(32),
-									app.Span().Text(c.userInfo.Name),
-								)
-						*/
-						return app.Div().
-							Body(
-								blazar.Button().
-									Label("Log out as " + c.userInfo.Name).
-									Icon(tabler.IconOutlineLogout).
-									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-										c.logout(ctx)
-										ctx.Update()
-									}),
-							)
-					}),
-					app.IfSlice(c.ready && c.userInfo != nil, func() []app.UI {
+					}).ElseSlice(func() []app.UI {
 						return []app.UI{
+							/*
+								app.Div().
+									Body(
+										app.Img().Src(c.userInfo.Picture).Width(32).Height(32),
+										app.Span().Text(c.userInfo.Name),
+									),
+							*/
+							app.Div().
+								Body(
+									blazar.Button().
+										Label("Log out as " + c.userInfo.Name).
+										Icon(tabler.IconOutlineLogout).
+										OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+											c.logout(ctx)
+											ctx.Update()
+										}),
+								),
 							blazar.Collapse().
 								Label("Configuration").
 								Open(true).
@@ -455,7 +498,9 @@ type CallRow struct {
 	Direction       string        // The direction of the call.
 	Source          string        // The source phone number.
 	SourceName      string        // The name of the source.
+	SourceLink      string        // The link to the source.
 	Destination     string        // The destination phone number.
+	DestinationLink string        // The link to the destination.
 	DestinationName string        // The name of the destination.
 	Duration        time.Duration // The duration of the call.
 	ResultUser      string
@@ -601,14 +646,27 @@ func (c *CallsPage) renderCallFilter() app.UI {
 		)
 }
 
-func (c *CallsPage) renderCallSide(side string, phoneNumber string, name string) app.UI {
+func (c *CallsPage) renderCallSide(side string, phoneNumber string, name string, link string) app.UI {
 	body := []app.UI{}
 	if name != "" {
-		body = append(body,
-			app.Span().
-				Class("name").
-				Text(name),
-		)
+		if link != "" {
+			body = append(body,
+				app.A().
+					Href(link).
+					Target("_blank").
+					Body(
+						app.Span().
+							Class("name").
+							Text(name),
+					),
+			)
+		} else {
+			body = append(body,
+				app.Span().
+					Class("name").
+					Text(name),
+			)
+		}
 	}
 	body = append(body,
 		blazar.Copy().
@@ -680,7 +738,7 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 					return app.Div().
 						Class("call-side-container").
 						Body(
-							c.renderCallSide("source", row.Source, row.SourceName),
+							c.renderCallSide("source", row.Source, row.SourceName, row.SourceLink),
 							blazar.Icon().
 								Class("filter-icon").
 								Icon(func() string {
@@ -723,7 +781,7 @@ func (c *CallsPage) renderCallTable(callRows []CallRow) app.UI {
 					return app.Div().
 						Class("call-side-container").
 						Body(
-							c.renderCallSide("destination", row.Destination, row.DestinationName),
+							c.renderCallSide("destination", row.Destination, row.DestinationName, row.DestinationLink),
 							blazar.Icon().
 								Class("filter-icon").
 								Icon(func() string {
@@ -814,7 +872,9 @@ func (c *CallsPage) buildCallRows(calls []*Call) []CallRow {
 			Time:            call.Time,
 			Source:          call.Source,
 			SourceName:      call.SourceName,
+			SourceLink:      call.SourceLink,
 			Destination:     call.Destination,
+			DestinationLink: call.DestinationLink,
 			DestinationName: call.DestinationName,
 			Duration:        call.CallDuration,
 		}
@@ -853,6 +913,7 @@ func (c *CallsPage) buildCallRows(calls []*Call) []CallRow {
 		}
 		if row.Direction == DirectionOut {
 			resultUser = call.SourceName
+			row.SourceLink = call.SourceLink
 			if call.CallDuration == 0 {
 				incomplete = true
 			}
@@ -1023,9 +1084,15 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 
 func (c *CallsPage) login(ctx app.Context) error {
 	slog.InfoContext(ctx.Context, "CallPage: login.")
+
 	c.loggingIn = true
+	slog.InfoContext(ctx.Context, "CallPage: login: Started.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
 	defer func() {
 		c.loggingIn = false
+
+		slog.InfoContext(ctx.Context, "CallPage: login: Complete.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
 		ctx.Update()
 	}()
 
@@ -1050,6 +1117,13 @@ func (c *CallsPage) login(ctx app.Context) error {
 }
 
 func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.Token) error {
+	defer func() {
+		c.loggedIn = true
+		slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: Complete.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+
+		ctx.Update()
+	}()
+
 	tokenSource := oauth2.StaticTokenSource(&token)
 	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: tokenSource.", "tokenSource", tokenSource)
 
@@ -1087,6 +1161,111 @@ func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.
 	}
 	slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: adminClient created.", "adminClient", adminClient)
 	c.adminClient = adminClient
+
+	{
+		domain := ""
+		if i := strings.Index(c.userInfo.Email, "@"); i > 0 {
+			domain = c.userInfo.Email[i+1:]
+		}
+		contactsClient := googlecontactsfeed.NewClient(
+			googlecontactsfeed.WithDomain(domain),
+			googlecontactsfeed.WithAccessToken(c.userToken.AccessToken),
+		)
+
+		var startTime time.Time
+		{
+			var timeString string
+			ctx.GetState("contacts-sync", &timeString)
+			if timeString != "" {
+				t, err := time.Parse(time.RFC3339, timeString)
+				if err != nil {
+					slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: error parsing contacts-sync time.", "err", err)
+				} else {
+					startTime = t
+				}
+			}
+		}
+		contacts, err := contactsClient.GetContacts(ctx, googlecontactsfeed.GetContactsOptions{
+			MaxResults: 100_000,
+			UpdatedMin: startTime,
+		})
+		if err != nil {
+			if errors.Is(err, httperror.ErrStatusForbidden) {
+				// The user does not have access to the legacy shared contacts API.
+				slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: user does not have access to the legacy shared contacts API.", "err", err)
+
+				// Continue with zero contacts.
+				contacts = []googlecontactsfeed.GoogleContact{}
+			} else {
+				slog.ErrorContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: could not get contacts.", "err", err)
+				return fmt.Errorf("failed to get contacts: %w", err)
+			}
+		}
+		slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: Got the contacts.", "contacts", len(contacts))
+
+		var lastUpdatedTime time.Time
+		for _, contact := range contacts {
+			if contact.Updated != nil {
+				if lastUpdatedTime.IsZero() || lastUpdatedTime.Before(*contact.Updated) {
+					lastUpdatedTime = *contact.Updated
+				}
+			}
+
+			if contact.Deleted {
+				c.contacts = slices.DeleteFunc(c.contacts, func(c DBContact) bool {
+					return c.ID == contact.ID
+				})
+				continue
+			}
+
+			phoneNumber := ""
+			if len(contact.GDPhoneNumbers) > 0 {
+				phoneNumber = contact.GDPhoneNumbers[0].Value
+			}
+			emailAddress := ""
+			if len(contact.GDEmails) > 0 {
+				emailAddress = contact.GDEmails[0].Address
+			}
+			link := ""
+			for _, property := range contact.GDExtendedProperties {
+				if strings.HasPrefix(property.Value, "http://") || strings.HasPrefix(property.Value, "https://") {
+					link = property.Value
+					break
+				}
+			}
+
+			i := slices.IndexFunc(c.contacts, func(c DBContact) bool {
+				return c.ID == contact.ID
+			})
+			if i == -1 {
+				c.contacts = append(c.contacts, DBContact{
+					ID:           contact.ID,
+					Name:         contact.Title,
+					PhoneNumber:  phoneNumber,
+					EmailAddress: emailAddress,
+					Link:         link,
+				})
+			} else {
+				c.contacts[i] = DBContact{
+					ID:           contact.ID,
+					Name:         contact.Title,
+					PhoneNumber:  phoneNumber,
+					EmailAddress: emailAddress,
+					Link:         link,
+				}
+			}
+		}
+		c.contactByPhoneNumber = map[string]DBContact{}
+		for _, contact := range c.contacts {
+			c.contactByPhoneNumber[contact.PhoneNumber] = contact
+		}
+		ctx.SetState("contacts", c.contacts).Persist()
+
+		if !lastUpdatedTime.IsZero() {
+			ctx.SetState("contacts-sync", lastUpdatedTime.Add(1*time.Second).Format(time.RFC3339)).Persist()
+		}
+		slog.InfoContext(ctx.Context, "CallPage: setTokenAsPartOfLoginWorkflow: contacts synced.", "lastUpdatedTime", lastUpdatedTime)
+	}
 
 	return nil
 }
@@ -1152,10 +1331,18 @@ func (c *CallsPage) logout(ctx app.Context) {
 	c.userToken = nil
 	ctx.SetState("user-token", nil).Persist()
 
+	c.contacts = []DBContact{}
+	c.contactByPhoneNumber = map[string]DBContact{}
+	ctx.SetState("contacts", nil).Persist()
+	ctx.SetState("contacts-sync", nil).Persist()
+
 	c.rawActivities = nil
 	c.calls = nil
 	c.callRows = nil
 	c.filteredCallRows = nil
+
+	c.loggedIn = false
+	c.loggingIn = false
 
 	blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Text("You have been logged out."))
 }
@@ -1266,7 +1453,7 @@ func (c *CallsPage) search(ctx app.Context) {
 			c.searching = false
 			c.searched = true
 			c.rawActivities = rawActivities
-			c.calls = parseCalls(ctx.Context, rawActivities)
+			c.calls = c.parseCalls(ctx.Context, rawActivities)
 			c.callRows = c.buildCallRows(c.calls)
 			c.filteredCallRows = c.filterCallRows(c.callRows)
 		})
@@ -1277,7 +1464,9 @@ type Call struct {
 	Time            time.Time     // The time of the call.
 	Source          string        // The source phone number.
 	SourceName      string        // The name of the source.
+	SourceLink      string        // The link to the source.
 	Destination     string        // The destination phone number.
+	DestinationLink string        // The link to the destination.
 	DestinationType string        // One of: auto-attendant, ring-group, phone.
 	DestinationName string        // The name of the destination.
 	RingDuration    time.Duration // The duration of the ring.
@@ -1289,7 +1478,7 @@ type Call struct {
 	Calls           []*Call       // Only when DestinationType is auto-attendant or ring-group.
 }
 
-func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
+func (c *CallsPage) parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 	calls := []*Call{}
 
 	rawActivitiesCopy := make([]*admin.Activity, len(rawActivities))
@@ -1373,6 +1562,19 @@ func parseCalls(ctx context.Context, rawActivities []*admin.Activity) []*Call {
 			}
 			if call.DestinationName == call.Destination {
 				call.DestinationName = ""
+			}
+
+			if call.SourceName == "" {
+				if contact, ok := c.contactByPhoneNumber[call.Source]; ok {
+					call.SourceName = contact.Name
+					call.SourceLink = contact.Link
+				}
+			}
+			if call.DestinationName == "" {
+				if contact, ok := c.contactByPhoneNumber[call.Destination]; ok {
+					call.DestinationName = contact.Name
+					call.DestinationLink = contact.Link
+				}
 			}
 			calls = append(calls, call)
 		}
