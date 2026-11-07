@@ -39,9 +39,10 @@ type CallsPage struct {
 	configuration Configuration
 	filter        Filter
 
-	ready     bool // This will be true when the initial setup is all ready.
-	loggedIn  bool // This will be true when the user is logged in.
-	loggingIn bool // This will be true when the user is logging in.
+	ready              bool // This will be true when the initial setup is all ready.
+	loggedIn           bool // This will be true when the user is logged in.
+	loggingIn          bool // This will be true when the user is logging in.
+	loggingInViaButton bool
 
 	searching        bool
 	searched         bool
@@ -230,21 +231,27 @@ func (c *CallsPage) Render() app.UI {
 								blazar.Button().
 									Label("Sign in with Google").
 									Icon(tabler.IconFilledBrandGoogle).
-									Disabled(c.loggingIn).
+									Disabled(c.loggingIn || c.loggingInViaButton).
 									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-										//ctx.Defer(func(ctx app.Context) {
-										err := c.login(ctx)
-										if err != nil {
-											slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
-											blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Could not sign in with Google: "+err.Error()))
-											return
-										}
+										ctx.Dispatch(func(ctx app.Context) {
+											c.loggingInViaButton = true
+										})
 
 										ctx.Defer(func(ctx app.Context) {
-											slog.InfoContext(ctx.Context, "CallPage: Running search after Google login.")
-											c.search(ctx)
+											c.loggingInViaButton = false
+
+											err := c.login(ctx)
+											if err != nil {
+												slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
+												blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Could not sign in with Google: "+err.Error()))
+												return
+											}
+
+											ctx.Defer(func(ctx app.Context) {
+												slog.InfoContext(ctx.Context, "CallPage: Running search after Google login.")
+												c.search(ctx)
+											})
 										})
-										//})
 									}),
 							)
 					}).ElseSlice(func() []app.UI {
