@@ -1352,8 +1352,8 @@ func (c *CallsPage) logout(ctx app.Context) {
 	c.userToken = nil
 	ctx.SetState("user-token", nil).Persist()
 
-	c.contacts = nil
-	c.contactByPhoneNumber = nil
+	c.contacts = []DBContact{}
+	c.contactByPhoneNumber = map[string]DBContact{}
 	ctx.SetState("contacts", nil).Persist()
 	ctx.SetState("contacts-sync", nil).Persist()
 
