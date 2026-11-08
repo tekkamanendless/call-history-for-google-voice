@@ -276,7 +276,7 @@ func (c *CallsPage) Render() app.UI {
 									app.Div().
 										Body(
 											blazar.Button().
-												Label("Log out as "+c.userInfo.Name).
+												Label("Log out").
 												Icon(tabler.IconOutlineLogout).
 												OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
 													c.logout(ctx)
