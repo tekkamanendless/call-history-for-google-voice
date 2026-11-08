@@ -39,10 +39,9 @@ type CallsPage struct {
 	configuration Configuration
 	filter        Filter
 
-	ready              bool // This will be true when the initial setup is all ready.
-	loggedIn           bool // This will be true when the user is logged in.
-	loggingIn          bool // This will be true when the user is logging in.
-	loggingInViaButton bool
+	ready     bool // This will be true when the initial setup is all ready.
+	loggedIn  bool // This will be true when the user is logged in.
+	loggingIn bool // This will be true when the user is logging in.
 
 	searching        bool
 	searched         bool
@@ -143,6 +142,8 @@ func (c *CallsPage) OnMount(ctx app.Context) {
 		}
 	}
 
+	ctx.Handle("CallsPage.login", c.login)
+
 	{
 		loginCallback := func(token oauth2.Token) {
 			slog.InfoContext(ctx.Context, "CallPage: OnMount: loginCallback", "token", token)
@@ -220,63 +221,67 @@ func (c *CallsPage) Render() app.UI {
 			app.IfSlice(!c.ready, func() []app.UI {
 				return []app.UI{
 					app.Div().Text("Performing initial setup..."),
+					blazar.ProgressBar().
+						Indeterminate(true),
 				}
 			}).ElseSlice(func() []app.UI {
 				return []app.UI{
-					app.If(c.loggingIn, func() app.UI {
-						return app.Div().Text("Logging in with Google...")
+					app.IfSlice(c.loggingIn, func() []app.UI {
+						return []app.UI{
+							app.Div().Text("Logging in with Google..."),
+							blazar.ProgressBar().
+								Indeterminate(true),
+						}
 					}).ElseIf(!c.loggedIn, func() app.UI {
 						return app.Div().
 							Body(
 								blazar.Button().
-									Label(func() string {
-										if c.loggingIn || c.loggingInViaButton {
-											return "Signing in with Google..."
-										}
-										return "Sign in with Google"
-									}()).
+									Label("Sign in with Google").
 									Icon(tabler.IconFilledBrandGoogle).
-									Disabled(c.loggingIn || c.loggingInViaButton).
+									Disabled(c.loggingIn).
 									OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-										ctx.Dispatch(func(ctx app.Context) {
-											c.loggingInViaButton = true
-										})
-
-										ctx.Defer(func(ctx app.Context) {
-											c.loggingInViaButton = false
-
-											err := c.login(ctx)
-											if err != nil {
-												slog.ErrorContext(ctx.Context, "CallPage: Render: could not login.", "err", err)
-												blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Could not sign in with Google: "+err.Error()))
-												return
-											}
-
-											ctx.Defer(func(ctx app.Context) {
-												slog.InfoContext(ctx.Context, "CallPage: Running search after Google login.")
-												c.search(ctx)
-											})
-										})
+										ctx.NewAction("CallsPage.login")
 									}),
 							)
 					}).ElseSlice(func() []app.UI {
 						return []app.UI{
-							/*
-								app.Div().
-									Body(
-										app.Img().Src(c.userInfo.Picture).Width(32).Height(32),
-										app.Span().Text(c.userInfo.Name),
-									),
-							*/
 							app.Div().
+								Style("display", "flex").
+								Style("flex-direction", "row").
+								Style("gap", "1em").
 								Body(
-									blazar.Button().
-										Label("Log out as " + c.userInfo.Name).
-										Icon(tabler.IconOutlineLogout).
-										OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
-											c.logout(ctx)
-											ctx.Update()
-										}),
+									app.Div().
+										Style("display", "flex").
+										Style("flex-direction", "row").
+										Style("gap", "1em").
+										Style("align-items", "center").
+										Body(
+											app.Img().
+												Src(c.userInfo.Picture).
+												Width(32).
+												Height(32).
+												Attr("referrerpolicy", "no-referrer"),
+											app.Div().
+												Body(
+													app.Div().
+														Text(c.userInfo.Name),
+													app.Div().
+														Style("font-size", "0.8em").
+														Text(c.userInfo.Email),
+												),
+										),
+									app.Div().
+										Style("flex", "1"),
+									app.Div().
+										Body(
+											blazar.Button().
+												Label("Log out as "+c.userInfo.Name).
+												Icon(tabler.IconOutlineLogout).
+												OnClick(func(ctx app.Context, e htmlevent.MouseEvent) {
+													c.logout(ctx)
+													ctx.Update()
+												}),
+										),
 								),
 							blazar.Collapse().
 								Label("Configuration").
@@ -336,21 +341,24 @@ func (c *CallsPage) Render() app.UI {
 										}
 									}),
 								),
-							blazar.Form().
-								Body().
-								Action(blazar.FormAction{
-									Name:     "Search",
-									Icon:     tabler.IconOutlineSearch,
-									Function: c.search,
-								}),
-							blazar.ProgressBar().
-								Style("visibility", func() string {
-									if c.searching {
-										return "visible"
-									}
-									return "hidden"
-								}()).
-								Indeterminate(true),
+							app.Div().
+								Body(
+									blazar.Form().
+										Body().
+										Action(blazar.FormAction{
+											Name:     "Search",
+											Icon:     tabler.IconOutlineSearch,
+											Function: c.search,
+										}),
+									blazar.ProgressBar().
+										Style("visibility", func() string {
+											if c.searching {
+												return "visible"
+											}
+											return "hidden"
+										}()).
+										Indeterminate(true),
+								),
 							app.If(c.errorMessage != "", func() app.UI {
 								return blazar.StatusBar().
 									Bad().
@@ -1082,38 +1090,56 @@ func (c *CallsPage) renderCalls(calls []*Call) app.UI {
 	})
 }
 
-func (c *CallsPage) login(ctx app.Context) error {
-	slog.InfoContext(ctx.Context, "CallPage: login.")
+func (c *CallsPage) login(ctx app.Context, action app.Action) {
+	ctx.Dispatch(func(ctx app.Context) {
+		c.loggingIn = true
+	})
 
-	c.loggingIn = true
-	slog.InfoContext(ctx.Context, "CallPage: login: Started.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+	ctx.Async(func() {
+		err := func() error {
+			slog.InfoContext(ctx.Context, "CallPage: login.")
 
-	defer func() {
-		c.loggingIn = false
+			c.loggingIn = true
+			slog.InfoContext(ctx.Context, "CallPage: login: Started.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
 
-		slog.InfoContext(ctx.Context, "CallPage: login: Complete.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
+			defer func() {
+				c.loggingIn = false
 
-		ctx.Update()
-	}()
+				slog.InfoContext(ctx.Context, "CallPage: login: Complete.", "loggingIn", c.loggingIn, "loggedIn", c.loggedIn)
 
-	if c.authClient == nil {
-		slog.ErrorContext(ctx.Context, "CallPage: login: authClient is nil")
-		return fmt.Errorf("authClient is nil")
-	}
+				ctx.Update()
+			}()
 
-	err := c.authClient.RequestAccessToken()
-	if err != nil {
-		slog.ErrorContext(ctx.Context, "CallPage: login: error requesting access token.", "err", err)
-		return fmt.Errorf("failed to refresh token: %w", err)
-	}
+			if c.authClient == nil {
+				slog.ErrorContext(ctx.Context, "CallPage: login: authClient is nil")
+				return fmt.Errorf("authClient is nil")
+			}
 
-	err = c.setTokenAsPartOfLoginWorkflow(ctx, c.authClient.Token())
-	if err != nil {
-		slog.ErrorContext(ctx.Context, "CallPage: login: error logging in with token.", "err", err)
-		return fmt.Errorf("failed to login with token: %w", err)
-	}
+			err := c.authClient.RequestAccessToken()
+			if err != nil {
+				slog.ErrorContext(ctx.Context, "CallPage: login: error requesting access token.", "err", err)
+				return fmt.Errorf("failed to refresh token: %w", err)
+			}
 
-	return nil
+			err = c.setTokenAsPartOfLoginWorkflow(ctx, c.authClient.Token())
+			if err != nil {
+				slog.ErrorContext(ctx.Context, "CallPage: login: error logging in with token.", "err", err)
+				return fmt.Errorf("failed to login with token: %w", err)
+			}
+
+			ctx.Defer(func(ctx app.Context) {
+				slog.InfoContext(ctx.Context, "CallPage: login: Running search after Google login.")
+				c.search(ctx)
+			})
+
+			return nil
+		}()
+		if err != nil {
+			slog.ErrorContext(ctx.Context, "CallPage: login: Render: could not login.", "err", err)
+			blazar.SendSnackbarMessage(ctx, "snackbar-message", blazar.SnackbarMessage().Closable(true).Bad().Text("Could not sign in with Google: "+err.Error()))
+			return
+		}
+	})
 }
 
 func (c *CallsPage) setTokenAsPartOfLoginWorkflow(ctx app.Context, token oauth2.Token) error {
