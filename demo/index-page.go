@@ -44,7 +44,10 @@ func (c *IndexPage) Render() app.UI {
 					app.Text(". "),
 				),
 				app.P().Body(
-					app.Text("You'll need to use a Google Workspace account with the following permissions."),
+					app.Text("You'll need to use a Google Workspace account with the following permissions. "),
+					app.Text("You can create a new role with those permissions under "),
+					app.A().Href("https://admin.google.com/ac/list/roles").Text("Admin Roles"),
+					app.Text(". "),
 				),
 				app.Ol().Body(
 					app.Li().Body(
