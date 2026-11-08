@@ -260,6 +260,7 @@ func (c *CallsPage) Render() app.UI {
 												Src(c.userInfo.Picture).
 												Width(32).
 												Height(32).
+												Style("border-radius", "50%").
 												Attr("referrerpolicy", "no-referrer"),
 											app.Div().
 												Body(
