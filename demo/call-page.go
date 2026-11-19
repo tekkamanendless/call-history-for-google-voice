@@ -11,9 +11,9 @@ import (
 
 	"github.com/go-app-blazar/blazar/blazar"
 	"github.com/go-app-blazar/blazar/htmlevent"
+	"github.com/go-app-blazar/googleoauthjs"
 	"github.com/go-app-blazar/tabler-font"
 	"github.com/maxence-charriere/go-app/v11/pkg/app"
-	"github.com/tekkamanendless/call-history-for-google-voice/googleoauthjs"
 	"github.com/tekkamanendless/googlecontactsfeed"
 	"github.com/tekkamanendless/httperror"
 	"golang.org/x/oauth2"
