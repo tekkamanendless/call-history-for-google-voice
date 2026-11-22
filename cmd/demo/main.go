@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-app-blazar/blazar/blazar"
 	"github.com/go-app-blazar/blazar/blazarapp"
+	"github.com/go-app-blazar/googleoauthjs/plugin/googleoauth"
 	"github.com/go-app-blazar/router"
 	"github.com/joho/godotenv"
 	"github.com/lmittmann/tint"
@@ -151,14 +152,8 @@ func main() {
 		Name:        "Call History for Google Voice",
 		Description: "Call History for Google Voice",
 		Title:       "Call History for Google Voice",
-		Scripts: []string{
-			"https://accounts.google.com/gsi/client",
-		},
-		RawHeaders: []string{
-			//`<meta name="referrer" content="no-referrer-when-downgrade">`,
-			//`<meta name="referrer" content="unsafe-url">`,
-			//`<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' http://localhost:* https://accounts.google.com; connect-src 'self' http://localhost:* https://*.google.com; frame-src https://*.google.com; img-src 'self' https://*.google.com; style-src 'self' 'unsafe-inline' https://*.google.com;">`,
-		},
+		Scripts:     []string{},
+		RawHeaders:  []string{},
 		Env: map[string]string{
 			"LOG_LEVEL": os.Getenv("LOG_LEVEL"),
 		},
@@ -167,6 +162,7 @@ func main() {
 	blazarApp.AddPlugin(mainplugin.NewPlugin(mainplugin.Config{
 		Location: "/web/main/",
 	}))
+	blazarApp.AddPlugin(googleoauth.NewPlugin(googleoauth.Config{}))
 
 	slog.InfoContext(ctx, "Disable service worker?", "disableServiceWorker", disableServiceWorker)
 	if disableServiceWorker {
